@@ -1,6 +1,6 @@
 # APHELION — Vision, Scientific Architecture & Development Plan
 
-**Status:** v0.1 initial implementation, awaiting complete local integration testing  
+**Status:** v0.2 Ground Control implemented; local runtime validation is the next checkpoint  
 **Project identity:** Orbital Detective / APHELION  
 **Type:** Personal, interactive scientific playground, not a production satellite operations tool
 
@@ -107,7 +107,7 @@ These are useful teaching/validation formulas, not replacements for SGP4 for rea
 
 ### 6.4 Ground-station passes
 
-For observer elevation \(e(t)\) and chosen horizon mask \(e_{\min}\), idealized geometric visibility is \(e(t) \ge e_{\min}\). We compute rise, peak, and set events over a requested interval. In v0.1 the mask is a fixed **10 degrees**; configurable thresholds belong to slice 0.2. An above-mask pass is not automatically optically visible or radio-reachable.
+For observer elevation \(e(t)\) and chosen horizon mask \(e_{\min}\), idealized geometric visibility is \(e(t) \ge e_{\min}\). We compute rise, peak, and set events over a requested interval. In v0.2 the observer mask is configurable from **0° to 30°**, passed through to Skyfield pass predictions and the contact-margin samples. An above-mask pass is not automatically optically visible or radio-reachable.
 
 ### 6.5 Uncertainty and limitations
 
@@ -142,4 +142,26 @@ README.md                  # Installation and run instructions
 
 ## 8. Next action
 
-First verify v0.1 locally after publishing. Then implement **slice 0.2 — Ground Control** as a coordinated pair: station placement and elevation-mask calculations in FastAPI **plus** immediate interactive globe placement, animated horizon geometry, and updated pass display in React. Do not start a separate backend-only sprint.
+Verify **v0.2 Ground Control** locally and resolve any integration bugs before v0.3. Ground Control includes arbitrary point placement via globe raycasting (click, not drag), 0°–30° mask input, backend-recomputed WGS84 line-of-sight and passes, contact-margin readings, a spherical-reference footprint visualization, and pass-to-peak timeline navigation. Do not begin a backend-only sprint.
+
+
+## 9. v0.2 Ground Control — mathematical/visual contract
+
+For a chosen geodetic station (latitude, longitude, zero WGS84 ellipsoidal height), Skyfield gives the satellite's observer-relative **azimuth**, **elevation** \(e(t)\), and **slant range**. For a user-selected mask \(e_{\min} \in [0°,30°]\), the **contact margin** is
+
+\[
+M(t) = e(t) - e_{\min}.
+\]
+
+The UI shades margins above zero green, below zero amber and draws the corresponding line of sight only when \(M(t) \geq 0\). This denotes **geometric contact eligibility** (not a verified RF link). Pass predictions are computed anew for each chosen mask and station; a selected pass card jumps to the calculated culmination time.
+
+The glowing footprint around the satellite's subpoint uses the **ideal spherical Earth reference** (not WGS84 geodesic geometry). With mean Earth radius \(R=6371\) km, altitude \(h\), and elevation mask \(e\), the angular radius along the Earth is
+
+\[
+\psi = rccos\!\left(rac{R}{R+h}\cos e
+ight)-e,\qquad D_{\mathrm{surface}} = R\psi.
+\]
+
+Angles inside the trigonometric expression must be in radians. The backend provides \(\psi\) per orbital sample and the reference footprint radius in kilometers; the UI projects it as a small circle using spherical destination-point calculations. This overlay is an **approximation for intuition**: at nonzero WGS84 flattening it need not coincide exactly with the station elevation boundary. Display positions between 45-second backend samples are interpolated for smoothness, not independently propagated.
+
+**Checks:** test that raising the mask decreases footprint radius and contact margin, that increasing altitude increases footprint radius, and that API responses round-trip arbitrary valid station coordinates. Validate visually that clicking relocates the station and all readings update together, mask changes redraw threshold and orbit overlay, and no stale station readings are shown during recalculation.

@@ -4,14 +4,17 @@
 
 > **Project rule:** Every new scientific/backend capability ships in the same vertical slice as its polished, interactive UI. We will not build the entire backend first and add a frontend later.
 
-## What exists in v0.1
+## What exists in v0.2
 
 - Interactive, stylized **3D Earth** with orbit/ground-track visualization and a predicted ISS position marker.
 - Real **ISS orbital propagation** via Skyfield/SGP4 using CelesTrak orbital elements (not live telemetry).
 - **Simulation controls** for pausing, scrubbing, stepping and accelerating time.
 - Ground-station selector: **New Delhi, Tokyo, Oslo and San Francisco**.
 - Backend-computed **azimuth, elevation, slant range, altitude, and orbital speed**.
-- Upcoming **satellite passes** over a configurable location using the current fixed **10° minimum elevation mask**.
+- Upcoming **satellite passes** over a selected ground station with a configurable **0°–30° elevation mask**.
+- **Ground Control v0.2**: Click **PLACE ON 3D EARTH**, choose any location, and watch ground station, pointing telemetry, contact margin, and 24-hour passes recalculate together.
+- **Elevation-mask explorer** with a responsive slider, dynamic SVG threshold, animated contact indicator, and a glowing reference-footprint circle on the globe.
+- Click a predicted pass to jump to its peak and pause the timeline.
 - Telemetry, passes, and science/provenance views, with clear data-source and cache status.
 
 The Earth texture, star field, atmosphere, visual glow, and animation styling are illustrative; calculated spacecraft states are model predictions. This application is for exploration and education, not satellite operations or collision avoidance.
@@ -82,11 +85,13 @@ Open **http://localhost:5173** in your browser. Keep both terminal processes run
 
 ## Try it out
 
-1. **Rotate and zoom** the Earth; select the ISS marker and inspect its track.
+1. **Rotate and zoom** the Earth; inspect the ISS marker and track.
 2. **Pause, scrub, and accelerate time**; watch the predicted location and telemetry follow the same computed data.
 3. **Change ground stations**; check how elevation, azimuth, range, and contact windows change.
-4. Open **Passes** for predicted above-10° windows over the selected station.
-5. Open **Science** to inspect the propagator, orbital-element epoch, and cache provenance.
+4. Click **PLACE ON 3D EARTH** in the floating Ground Control panel, then click any point on the planet to move the virtual station.
+5. Drag the **MIN. ELEVATION** slider from 0° to 30° and watch the footprint, contact margin, elevation graph, and passes respond.
+6. Open **Passes**, then click a pass card to jump to the predicted peak.
+7. Open **Science** to inspect propagation, orbital-element epoch, cache provenance, and footprint assumptions.
 
 ## Tests and validation
 
@@ -104,7 +109,7 @@ cd frontend
 npm run build
 ```
 
-**Current verification:** Initial source files have passed basic Python and TypeScript syntax-level checks. A full dependency-installed runtime and integration validation is still required on a local machine. If something fails, report the console output and we will fix it as part of the next integrated UI + backend slice.
+**Current verification:** Initial source files have passed basic Python and TypeScript syntax-level checks. A full dependency-installed runtime and integration validation is still required on a local machine. If something fails, report the console output and we will fix it before expanding scope.
 
 ## Project structure
 
@@ -116,11 +121,12 @@ npm run build
 ├── backend/
 │   ├── app/main.py              # FastAPI endpoints
 │   ├── app/orbits.py            # Real SGP4 propagation and visibility calculations
-│   ├── tests/test_orbits.py     # Mathematical sanity checks
+│   ├── tests/                  # Mathematical and offline API contract checks
 │   └── requirements.txt
 ├── frontend/
 │   ├── src/App.tsx              # Mission-control app and interactions
 │   ├── src/components/OrbitalGlobe.tsx
+│   ├── src/components/GroundControl.tsx
 │   ├── src/lib/orbit.ts         # Typed API models and display interpolation
 │   └── package.json
 └── generate_earth_texture.py   # Optional image asset regeneration script
@@ -139,8 +145,16 @@ npm run build
 
 ## Scope discipline
 
-This is a personal scientific playground, **not a SaaS**. No authentication, payment features, accounts, or production infrastructure unless they become essential to a specific experiment. The next planned slice is an **interactive ground-station placement + elevation-mask explorer**, with backend visibility calculations and corresponding visual feedback delivered together.
+This is a personal scientific playground, **not a SaaS**. No authentication, payment features, accounts, or production infrastructure unless they become essential to a specific experiment. v0.2 is the **ground-station placement + elevation-mask explorer**. Next proposal: **v0.3 Orbit Explorer**, only after local verification of v0.2.
 
 ## Scientific limitations
 
-Orbital positions are **SGP4 predictions**, not live satellite telemetry. Observer geometry uses WGS84 and a simplified horizon elevation threshold, not terrain, weather, optical brightness, or actual radio link budgets. The visualization interpolates between backend-computed time samples for smooth animation. The ±14-day TLE epoch guard is only a conservative UI limit, **not** a guarantee of prediction accuracy anywhere inside that window. Time and frame conventions must be checked whenever orbital models or UI controls change.
+Orbital positions are **SGP4 predictions**, not live satellite telemetry. Observer geometry uses WGS84 and a simplified horizon elevation threshold, not terrain, weather, optical brightness, or actual radio link budgets. **The luminous footprint is calculated using a spherical Earth of radius 6,371 km**, centered on the sub-satellite point: its edge is explanatory rather than an exact WGS84 coverage boundary. The visualization interpolates between backend-computed time samples for smooth animation. The ±14-day TLE epoch guard is only a conservative UI limit, **not** a guarantee of prediction accuracy anywhere inside that window. Time and frame conventions must be checked whenever orbital models or UI controls change.
+
+### Ground Control API (v0.2)
+
+`GET /api/mission?station_lat=28.6139&station_lon=77.209&min_elevation_deg=10`
+
+Optional `at=` must be timezone-aware ISO 8601. Input coordinates are validated and the minimum elevation must be in **[0°, 30°]**. Each sampled state supplies `contact_margin_deg` and `footprint_deg`. The response's `coverage` metadata identifies the spherical-reference model; only observer azimuth/elevation and pass predictions use the WGS84 Skyfield geometry. Rapid slider changes are debounced; superseded HTTP requests are aborted.
+
+**Windows note:** If you already created a virtual environment in the repository root, you may continue using it: `python -m pip install -r .\backend\requirements.txt`, then `cd backend` and start Uvicorn as above.

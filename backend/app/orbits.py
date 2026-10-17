@@ -16,6 +16,7 @@ DATA_DIRECTORY = Path(os.environ.get("ORBIT_DATA_DIR", Path(__file__).resolve().
 TLE_FILE = DATA_DIRECTORY / "iss_25544.tle"
 CELESTRAK_URL = "https://celestrak.org/NORAD/elements/gp.php?CATNR=25544&FORMAT=TLE"
 CACHE_TTL = timedelta(hours=6)
+MEAN_EARTH_RADIUS_KM = 6371.0
 _lock = Lock()
 _last_fetch_attempt: datetime | None = None
 
@@ -78,7 +79,24 @@ def safe_satellite() -> tuple[EarthSatellite, dict]:
         }
 
 
-def point_at(satellite: EarthSatellite, observer, instant: datetime) -> dict:
+def footprint_angle_deg(altitude_km: float, elevation_mask_deg: float) -> float:
+    """Idealized spherical-Earth subsatellite footprint radius (central angle).
+
+    Derivation: psi = arccos[(R / (R+h)) cos(e)] - e.
+    This is a *visual reference footprint*, not the WGS84 station contact test.
+    """
+    if altitude_km < 0:
+        raise ValueError("Altitude must be nonnegative for a coverage footprint")
+    if not 0 <= elevation_mask_deg <= 90:
+        raise ValueError("Elevation mask must be between 0 and 90 degrees")
+    e = math.radians(elevation_mask_deg)
+    psi = math.acos(max(-1.0, min(1.0, MEAN_EARTH_RADIUS_KM / (
+        MEAN_EARTH_RADIUS_KM + altitude_km
+    ) * math.cos(e)))) - e
+    return math.degrees(max(0.0, psi))
+
+
+def point_at(satellite: EarthSatellite, observer, instant: datetime, mask: float = 10.0) -> dict:
     t = timescale().from_datetime(instant)
     geocentric = satellite.at(t)
     location = wgs84.geographic_position_of(geocentric)
@@ -93,6 +111,8 @@ def point_at(satellite: EarthSatellite, observer, instant: datetime) -> dict:
         "elevation_deg": round(elevation.degrees, 3),
         "azimuth_deg": round(azimuth.degrees % 360, 3),
         "slant_km": round(slant.km, 3),
+        "contact_margin_deg": round(elevation.degrees - mask, 3),
+        "footprint_deg": round(footprint_angle_deg(location.elevation.km, mask), 4),
     }
 
 
@@ -126,13 +146,19 @@ def upcoming_passes(satellite: EarthSatellite, station, start: datetime, mask: f
     return passes[:8]
 
 
-def build_mission(satellite: EarthSatellite, provenance: dict, at: datetime, station_lat: float, station_lon: float):
+def build_mission(satellite: EarthSatellite, provenance: dict, at: datetime, station_lat: float, station_lon: float, mask: float = 10.0):
+    if not (math.isfinite(station_lat) and math.isfinite(station_lon) and math.isfinite(mask)):
+        raise ValueError("Station coordinates and elevation mask must be finite")
+    if not -90 <= station_lat <= 90 or not -180 <= station_lon <= 180:
+        raise ValueError("Invalid station coordinates")
+    if not 0 <= mask <= 30:
+        raise ValueError("Elevation mask must be between 0 and 30 degrees")
     observer = wgs84.latlon(station_lat, station_lon)
     if abs((at - satellite.epoch.utc_datetime()).total_seconds()) > 14 * 86400:
         raise ValueError("Requested time is more than 14 days from the orbital-element epoch. Refusing an unreliable propagation.")
-    state = point_at(satellite, observer, at)
+    state = point_at(satellite, observer, at, mask)
     start = at - timedelta(minutes=55)
-    track = [point_at(satellite, observer, start + timedelta(seconds=i * 45)) for i in range(148)]
+    track = [point_at(satellite, observer, start + timedelta(seconds=i * 45), mask) for i in range(148)]
     model = satellite.model
     return {
         "satellite": {
@@ -141,10 +167,17 @@ def build_mission(satellite: EarthSatellite, provenance: dict, at: datetime, sta
             "inclination_deg": round(math.degrees(model.inclo), 3),
             "period_minutes": round(2 * math.pi / model.no_kozai, 2),
         },
-        "station": {"name": "Selected ground station", "lat": station_lat, "lon": station_lon, "minimum_elevation_deg": 10.0},
+        "station": {"name": "Selected ground station", "lat": station_lat, "lon": station_lon, "minimum_elevation_deg": mask},
         "state": state,
         "track": track,
-        "passes": upcoming_passes(satellite, observer, at),
+        "passes": upcoming_passes(satellite, observer, at, mask),
+        "coverage": {
+            "model": "spherical_reference",
+            "earth_radius_km": MEAN_EARTH_RADIUS_KM,
+            "central_angle_deg": state["footprint_deg"],
+            "surface_radius_km": round(MEAN_EARTH_RADIUS_KM * math.radians(state["footprint_deg"]), 1),
+            "description": "Idealized spherical Earth; true station elevation uses WGS84 / Skyfield",
+        },
         "provenance": provenance,
         "computed_at": dt_iso(datetime.now(UTC)),
     }
