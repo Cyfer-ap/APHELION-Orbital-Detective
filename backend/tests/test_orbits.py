@@ -41,7 +41,10 @@ def test_integrated_mission_obeys_selected_mask():
     assert at25["coverage"]["central_angle_deg"] < at10["coverage"]["central_angle_deg"]
     assert at25["state"]["contact_margin_deg"] < at10["state"]["contact_margin_deg"]
     assert at25["state"]["lat"] == at10["state"]["lat"]
-    assert len(at25["passes"]) <= len(at10["passes"])
+    # A stricter mask can make a pass at the start boundary newly complete,
+    # so pass *counts* aren't monotone within a fixed 24-hour search interval.
+    assert all(p["max_elevation_deg"] >= 25 for p in at25["passes"])
+    assert all(p["max_elevation_deg"] >= 10 for p in at10["passes"])
 
 
 def test_invalid_station_mask_is_rejected():
