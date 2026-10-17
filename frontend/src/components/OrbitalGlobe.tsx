@@ -2,8 +2,8 @@ import { Canvas, ThreeEvent, useFrame } from '@react-three/fiber';
 import { Html, Line, OrbitControls, Stars, useTexture } from '@react-three/drei';
 import { memo, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
-import type { Mission, Sample, Station } from '../lib/orbit';
-import { earthVector, interpolate, surfaceCoordinates } from '../lib/orbit';
+import type { Mission, OrbitPreview, Sample, Station } from '../lib/orbit';
+import { earthVector, interpolate, interpolatePreview, surfaceCoordinates } from '../lib/orbit';
 
 type Coordinate = { lat: number; lon: number };
 
@@ -161,8 +161,42 @@ function OrbitPath({ track, station, current, mask }: { track: Sample[]; station
   </>;
 }
 
-function Scene({ mission, station, current, getTime, placing, onPlace, mask }: {
-  mission: Mission; station: Station; current: Sample | null; getTime: () => number;
+/** A frozen-at-instant orbital-plane reference ring (solid violet) and rotating-Earth
+ * ground path (faint dashed violet). Both geometries come from the Python engine. */
+function VirtualOrbit({ preview, getTime }: { preview: OrbitPreview; getTime: () => number }) {
+  const marker = useRef<THREE.Group>(null);
+  const glow = useRef<THREE.Mesh>(null);
+  const orbitalPlane = useMemo(
+    () => preview.plane_track.map(p => new THREE.Vector3(...earthVector(p.lat, p.lon, p.alt_km))),
+    [preview.plane_track]
+  );
+  const groundTrail = useMemo(
+    () => preview.track.map(p => new THREE.Vector3(...earthVector(p.lat, p.lon, 14))),
+    [preview.track]
+  );
+  useFrame(({clock}) => {
+    const state = interpolatePreview(preview.track, getTime());
+    if(!marker.current)return;
+    marker.current.visible=!!state;
+    if(!state)return;
+    marker.current.position.set(...earthVector(state.lat, state.lon, state.alt_km));
+    if(glow.current)glow.current.scale.setScalar(1+Math.sin(clock.elapsedTime * 3.1)*.19);
+  });
+  return <group raycast={() => null}>
+    <Line points={orbitalPlane} color="#c49bff" transparent opacity={.88} lineWidth={2.5} raycast={() => null}/>
+    <Line points={orbitalPlane} color="#885dff" transparent opacity={.13} lineWidth={10} raycast={() => null}/>
+    <Line points={groundTrail} color="#a976e7" transparent opacity={.48} dashed dashSize={.05} gapSize={.04} lineWidth={1.4} raycast={() => null}/>
+    <group ref={marker}>
+      <mesh><sphereGeometry args={[.045, 20, 20]}/><meshBasicMaterial color="#f4dcff"/></mesh>
+      <mesh ref={glow}><sphereGeometry args={[.104, 24, 24]}/><meshBasicMaterial color="#bc80ff" transparent opacity={.27} depthWrite={false}/></mesh>
+      <pointLight color="#b577ff" intensity={.7} distance={1.2}/>
+      <Html position={[.18, .18, 0]} center distanceFactor={8} className="virtual-sat-label" occlude><b>APHELION-X</b><span>IDEAL 2-BODY</span></Html>
+    </group>
+  </group>;
+}
+
+function Scene({ mission, preview, station, current, getTime, placing, onPlace, mask }: {
+  mission: Mission | null; preview: OrbitPreview | null; station: Station; current: Sample | null; getTime: () => number;
   placing: boolean; onPlace: (coordinates: Coordinate) => void; mask: number;
 }) {
   return <>
@@ -171,22 +205,23 @@ function Scene({ mission, station, current, getTime, placing, onPlace, mask }: {
     <directionalLight position={[-4, 2, -5]} intensity={0.3} color="#0d6dce" />
     <Stars radius={120} depth={80} count={1300} factor={3} fade speed={0.45} />
     <Suspense fallback={null}><Earth placing={placing} onPlace={onPlace} /></Suspense>
-    <OrbitPath track={mission.track} station={station} current={current} mask={mask} />
-    <DynamicSat track={mission.track} getTime={getTime} />
+    {mission && <OrbitPath track={mission.track} station={station} current={current} mask={mask} />}
+    {mission && <DynamicSat track={mission.track} getTime={getTime} />}
+    {preview && <VirtualOrbit preview={preview} getTime={getTime} />}
     <OrbitControls enablePan={false} enableDamping dampingFactor={0.06}
       minDistance={3.7} maxDistance={9} autoRotate={!placing} autoRotateSpeed={0.24} />
   </>;
 }
 
-function Globe({ mission, station, current, getTime, placing, onPlace, mask }: {
-  mission: Mission | null; station: Station; current: Sample | null; getTime: () => number;
+function Globe({ mission, preview, station, current, getTime, placing, onPlace, mask }: {
+  mission: Mission | null; preview: OrbitPreview | null; station: Station; current: Sample | null; getTime: () => number;
   placing: boolean; onPlace: (coordinate: Coordinate) => void; mask: number;
 }) {
   return <div className={`globe-container ${placing ? 'globe-is-placing' : ''}`}>
     <div className="globe-glow" aria-hidden="true" />
     <div className="globe-crosshairs" aria-hidden="true"><span /><span /></div>
-    {mission ? <Canvas camera={{ position: [2.7, 1.5, 4.7], fov: 44 }} gl={{ antialias: true, alpha: true }} dpr={[1, 1.8]}>
-      <Scene mission={mission} station={station} current={current} getTime={getTime} placing={placing} onPlace={onPlace} mask={mask} />
+    {mission || preview ? <Canvas camera={{ position: [2.7, 1.5, 4.7], fov: 44 }} gl={{ antialias: true, alpha: true }} dpr={[1, 1.8]}>
+      <Scene mission={mission} preview={preview} station={station} current={current} getTime={getTime} placing={placing} onPlace={onPlace} mask={mask} />
     </Canvas> : <div className="globe-placeholder"><span className="placeholder-orb" /></div>}
     <div className="globe-hint">{placing ? 'CLICK THE PLANET TO POSITION GS—01' : 'DRAG TO ROTATE'} <span>·</span> SCROLL TO ZOOM</div>
   </div>;

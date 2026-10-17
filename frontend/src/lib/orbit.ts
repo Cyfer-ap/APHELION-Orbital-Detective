@@ -62,3 +62,33 @@ export function surfaceCoordinates(point: { x: number; y: number; z: number }): 
   const r = Math.hypot(point.x, point.y, point.z);
   return {lat: Math.asin(point.y / r) * 180 / Math.PI, lon: Math.atan2(-point.z, point.x) * 180 / Math.PI};
 }
+
+/** Independent, idealized orbit model returned by /api/orbit/preview. */
+export type PreviewSample = { time: string; lat: number; lon: number; alt_km: number; speed_km_s: number };
+export type OrbitPreview = {
+  kind: 'hypothetical_circular_two_body'; name: string;
+  epoch_utc: string;
+  parameters: { altitude_km: number; inclination_deg: number; eccentricity: number; raan_deg: number; phase_deg_at_epoch: number };
+  derived: { orbital_radius_km: number; semimajor_axis_km: number; period_minutes: number; speed_km_s: number; angular_rate_rad_s: number };
+  state: PreviewSample;
+  track: PreviewSample[]; plane_track: PreviewSample[]; assumptions: string[];
+};
+
+/** Interpolate display samples in UTC, unwrapping longitude across ±180 degrees.
+ * Outside the sampled window return null: never freeze a virtual satellite. */
+export function interpolatePreview(track: PreviewSample[], ms: number): PreviewSample | null {
+  if (!track.length || ms < Date.parse(track[0].time) || ms > Date.parse(track[track.length-1].time)) return null;
+  let low = 0, high = track.length - 1;
+  while (high - low > 1) {
+    const mid = (low + high) >> 1;
+    if (Date.parse(track[mid].time) <= ms) low = mid; else high = mid;
+  }
+  const a = track[low], b = track[high];
+  const span = Date.parse(b.time) - Date.parse(a.time);
+  const t = span > 0 ? (ms - Date.parse(a.time)) / span : 0;
+  return {
+    time: new Date(ms).toISOString(),
+    lat: lerp(a.lat,b.lat,t), lon: angle(a.lon+180,b.lon+180,t)-180,
+    alt_km: lerp(a.alt_km,b.alt_km,t), speed_km_s: lerp(a.speed_km_s,b.speed_km_s,t),
+  };
+}

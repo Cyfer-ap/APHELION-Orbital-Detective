@@ -75,7 +75,7 @@ A feature is **not complete** after only step 2. The preferred unit of progress 
 |---|---|---|---|
 | **0.1 · First Contact** (initial code) | CelesTrak ISS TLE retrieval/cache; SGP4 state/ground track; observer angles and pass windows | 3D globe, moving ISS marker, animated trail, time control, station switcher, telemetry, passes and provenance screens | Positions and pass data appear in UI; errors surfaced; math checks run |
 | **0.2 · Ground Control** | Arbitrary station coordinates, configurable elevation mask, visibility windows | **Click/drag station** on globe; animated horizon/visibility cone; real-time pass/geometry updates; fine mask slider | Moving a station or changing mask updates the full view consistently |
-| **0.3 · Orbit Explorer** | Interpret inclination, eccentricity, semimajor axis/altitude and orbital period; validated orbital state outputs | Illustrated orbit-plane and inclination controls; linked 3D orbit and information panels | Slider interaction displays physically consistent orbital changes |
+| **0.3 · Orbit Explorer** (implemented) | Circular two-body inclination, semimajor axis/altitude, speed and period; validated state and epoch; Earth-fixed track | Altitude/inclination presets and sliders; animated violet spacecraft, tilted frozen-instant orbital plane and Earth-fixed ground trail; ISS comparison | Slider interaction triggers computation, visuals and numerical readouts together |
 | **0.4 · Mission Designer** | Two-body Keplerian virtual-satellite propagator and configurable initial conditions | Create CHACHA-SAT-01; manipulate orbital parameters; animate physical effects | Simulated satellite model visibly responds to parameters and passes checks |
 | **0.5 · Orbital Laboratory** | Numerical two-body integrator; compare with analytic baseline; diagnostic invariants | Split/overlay trajectory comparisons; interactive error plots and time controls | Explanatory comparison plots agree with controlled reference cases |
 | **0.6 · Orbital Detective** | Compare time-separated element sets and propagated positions; compute deviations | Visual "investigation" missions with orbit overlays and discrepancy timeline | User can inspect prediction differences without mistaking them for proven maneuvers |
@@ -142,7 +142,7 @@ README.md                  # Installation and run instructions
 
 ## 8. Next action
 
-Verify **v0.2 Ground Control** locally and resolve any integration bugs before v0.3. Ground Control includes arbitrary point placement via globe raycasting (click, not drag), 0°–30° mask input, backend-recomputed WGS84 line-of-sight and passes, contact-margin readings, a spherical-reference footprint visualization, and pass-to-peak timeline navigation. Do not begin a backend-only sprint.
+Verify **v0.3 Orbit Explorer** locally and resolve integration bugs before v0.4. Ground Control includes arbitrary point placement via globe raycasting (click, not drag), 0°–30° mask input, backend-recomputed WGS84 line-of-sight and passes, contact-margin readings, a spherical-reference footprint visualization, and pass-to-peak timeline navigation. Do not begin a backend-only sprint.
 
 
 ## 9. v0.2 Ground Control — mathematical/visual contract
@@ -165,3 +165,20 @@ ight)-e,\qquad D_{\mathrm{surface}} = R\psi.
 Angles inside the trigonometric expression must be in radians. The backend provides \(\psi\) per orbital sample and the reference footprint radius in kilometers; the UI projects it as a small circle using spherical destination-point calculations. This overlay is an **approximation for intuition**: at nonzero WGS84 flattening it need not coincide exactly with the station elevation boundary. Display positions between 45-second backend samples are interpolated for smoothness, not independently propagated.
 
 **Checks:** test that raising the mask decreases footprint radius and contact margin, that increasing altitude increases footprint radius, and that API responses round-trip arbitrary valid station coordinates. Validate visually that clicking relocates the station and all readings update together, mask changes redraw threshold and orbit overlay, and no stale station readings are shown during recalculation.
+
+
+## 10. v0.3 Orbit Explorer — scientific and interface contract
+
+**Distinct models:** The amber ISS is real CelesTrak orbital-element propagation through SGP4/Skyfield, while APHELION-X (violet) is a *hypothetical* circular two-body orbit. The same UI timeline drives both animations; changing the virtual altitude or inclination must never alter the ISS state. Orbit Explorer remains operational if ISS element downloads fail.
+
+The circular-orbit parameters are altitude `h ∈ [200,2000] km` and inclination `i ∈ [0°,180°]`. Eccentricity is fixed to 0, ascending node RAAN to 0 and initial circular anomaly to 0 at the browser's fixed **experiment epoch**. For spherical Earth radius `R = 6371 km` and terrestrial gravitational parameter `μ = 398600.4418 km³/s²`,
+
+`r = a = R + h`, `n = sqrt(μ / a³)`, `v = sqrt(μ/a)`, `T = 2π/n`.
+
+At `Δt` seconds from the experiment epoch and true anomaly `ν = nΔt`, our simplified ECI coordinates are `(r cosν, r sinν cos i, r sinν sin i)`. Convert to a spherical Earth-fixed frame by rotating about Earth's Z axis by the negative Greenwich mean sidereal angle at the *sample time*. For scientific traceability, this educational rotation computes GMST using UTC as a proxy for UT1, ignoring precession, nutation, polar motion, atmospheric drag, J2 and orbital maneuvers. The Cartesian → lat/lon conversion is spherical; it is **not** interchangeable with real-SGP4/WGS84 observations.
+
+The animated **solid violet orbital-plane ring** freezes the terrestrial orientation at the backend calculation instant. Thus it illustrates inclination but is not itself an Earth-fixed satellite trajectory over time. The **dashed violet ground trail** recomputes Earth's rotation at every sampled instant. The moving violet marker samples the latter, not the former; a small offset relative to the frozen plane is expected as time advances.
+
+The Python endpoint `GET /api/orbit/preview` validates both parameters and timezone-aware timestamps, independently constructs 241 UTC trajectory samples and 129 frozen-plane points and returns inputs, derived parameters and assumptions. The React side debounces requests, aborts superseded requests, never displays stale orbit results against new sliders, and interpolates only within a known sampled window.
+
+**Validation:** Kepler's third law, altitude–period monotonicity, altitude–speed monotonicity, maximum inclination latitude, sidereal rotation over six hours, API shape, and invalid parameter/time rejection. Next possible extension (v0.4) permits eccentricity and independent RAAN/initial anomaly, explicitly labeled as a more general orbit model rather than modifying the ISS.

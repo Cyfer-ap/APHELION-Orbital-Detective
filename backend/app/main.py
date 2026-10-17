@@ -3,8 +3,9 @@ from datetime import datetime, timezone
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from .orbits import build_mission, safe_satellite
+from .explorer import build_preview
 
-app = FastAPI(title="Orbital Detective API", version="0.2.0")
+app = FastAPI(title="Orbital Detective API", version="0.3.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -16,7 +17,7 @@ app.add_middleware(
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "version": "0.2.0", "mode": "predicted_orbit_not_live_telemetry"}
+    return {"status": "ok", "version": "0.3.0", "mode": "predicted_orbit_not_live_telemetry"}
 
 
 @app.get("/api/mission")
@@ -36,3 +37,22 @@ def mission(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Cannot calculate ISS orbit: {exc}") from exc
+
+
+@app.get("/api/orbit/preview")
+def preview_orbit(
+    at: datetime | None = None,
+    epoch: datetime | None = None,
+    altitude_km: float = Query(550, ge=200, le=2000),
+    inclination_deg: float = Query(51.6, ge=0, le=180),
+):
+    """Compare a hypothetical *circular two-body* orbit with the real ISS.
+
+    Independent of ISS element data: works while CelesTrak is unavailable.
+    """
+    moment = at or datetime.now(timezone.utc)
+    reference_epoch = epoch or moment
+    try:
+        return build_preview(moment, reference_epoch, altitude_km, inclination_deg)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc

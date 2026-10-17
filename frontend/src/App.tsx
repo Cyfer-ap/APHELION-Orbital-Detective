@@ -3,12 +3,13 @@ import { AnimatePresence, motion } from 'motion/react';
 import {
   Activity, ArrowDownRight, ArrowUpRight, ChevronDown, CircleDot, Clock3,
   Crosshair, Globe2, Info, LocateFixed, Pause, Play, Radio,
-  RefreshCw, Satellite, ShieldCheck, Signal, StepBack, StepForward, Waves,
+  RefreshCw, Satellite, ShieldCheck, Signal, StepBack, StepForward, Waves, Orbit,
 } from 'lucide-react';
 import Globe from './components/OrbitalGlobe';
 import GroundControl from './components/GroundControl';
+import OrbitExplorer from './components/OrbitExplorer';
 import { coord, interpolate, prettyTime, STATIONS } from './lib/orbit';
-import type { Mission, Sample, Station } from './lib/orbit';
+import type { Mission, OrbitPreview, Sample, Station } from './lib/orbit';
 import './style.css';
 
 type ClockState={anchor:number; wall:number; speed:number};
@@ -66,7 +67,15 @@ export default function App(){
   const [mission,setMission]=useState<Mission|null>(null);
   const [loading,setLoading]=useState(true);
   const [error,setError]=useState<string|null>(null);
-  const [pane,setPane]=useState<'orbit'|'passes'|'science'>('orbit');
+  const [pane,setPane]=useState<'orbit'|'passes'|'science'|'explore'>('orbit');
+  const [altitude,setAltitude]=useState(550);
+  const [inclination,setInclination]=useState(51.6);
+  const [preview,setPreview]=useState<OrbitPreview|null>(null);
+  const [previewLoading,setPreviewLoading]=useState(false);
+  const [previewError,setPreviewError]=useState<string|null>(null);
+  const previewRequest=useRef<AbortController|null>(null);
+  const previewEpoch=useRef(Date.now());
+
   const [clock,setClock]=useState<ClockState>({anchor:Date.now(),wall:Date.now(),speed:1});
   const [tick,setTick]=useState(Date.now());
 
@@ -79,6 +88,54 @@ export default function App(){
   const current=useMemo(()=>mission&&synced?interpolate(mission.track,simulatedTime):null,[mission,synced,simulatedTime]);
   const isNearLive=Math.abs(simulatedTime-Date.now())<10000&&clock.speed===1;
   const isContact=!!current&&current.elevation_deg>=mask;
+  const previewSynced=!!preview&&preview.parameters.altitude_km===altitude
+    &&preview.parameters.inclination_deg===inclination;
+  const visiblePreview=pane==='explore'&&previewSynced ? preview : null;
+
+  const fetchPreview=useCallback(async (at:number, h:number, inc:number)=>{
+    previewRequest.current?.abort();
+    const controller=new AbortController();
+    previewRequest.current=controller;
+    setPreviewError(null);
+    setPreviewLoading(true);
+    try {
+      const params=new URLSearchParams({
+        at:new Date(at).toISOString(),epoch:new Date(previewEpoch.current).toISOString(),
+        altitude_km:String(h),inclination_deg:String(inc)
+      });
+      const response=await fetch(`/api/orbit/preview?${params.toString()}`,{signal:controller.signal});
+      if(!response.ok) {
+        const body=await response.json().catch(()=>({}));
+        throw new Error(typeof body.detail==='string'?body.detail:`Preview error ${response.status}`);
+      }
+      const data:OrbitPreview=await response.json();
+      if(!controller.signal.aborted)setPreview(data);
+    } catch(e) {
+      if(!controller.signal.aborted)setPreviewError(e instanceof Error?e.message:String(e));
+    } finally {
+      if(previewRequest.current===controller){previewRequest.current=null;setPreviewLoading(false);}
+    }
+  },[]);
+
+  useEffect(()=>{
+    if(pane!=='explore')return;
+    const timer=window.setTimeout(()=>void fetchPreview(getTime(),altitude,inclination),230);
+    return ()=>window.clearTimeout(timer);
+    // getTime changes each clock control; change in time alone is handled by interpolation.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[pane,altitude,inclination,fetchPreview]);
+  useEffect(()=>()=>previewRequest.current?.abort(),[]);
+  useEffect(()=>{
+    if(pane!=='explore')return;
+    const timer=window.setInterval(()=>{
+      if(!preview||previewLoading||!previewSynced)return;
+      const start=Date.parse(preview.track[0].time),end=Date.parse(preview.track[preview.track.length-1].time);
+      const now=getTime();
+      if(now<start+12*60000||now>end-12*60000)void fetchPreview(now,altitude,inclination);
+    },5000);
+    return ()=>window.clearInterval(timer);
+  },[pane,preview,previewLoading,previewSynced,getTime,fetchPreview,altitude,inclination]);
+
 
   const fetchMission=useCallback(async (when:number,s:Station,minimum:number)=>{
     requestRef.current?.abort();
@@ -165,15 +222,16 @@ export default function App(){
         <button aria-label="Orbit overview" title="Orbit overview" className={`rail-item ${pane==='orbit'?'active':''}`} onClick={()=>setPane('orbit')}><Globe2 size={21}/></button>
         <button aria-label="Pass predictions" title="Pass predictions" className={`rail-item ${pane==='passes'?'active':''}`} onClick={()=>setPane('passes')}><Radio size={20}/></button>
         <button aria-label="Science details" title="Science details" className={`rail-item ${pane==='science'?'active':''}`} onClick={()=>setPane('science')}><Activity size={20}/></button>
+        <button aria-label="Virtual orbit explorer" title="Orbit explorer" className={`rail-item ${pane==='explore'?'active':''}`} onClick={()=>setPane('explore')}><Orbit size={20}/></button>
       </div>
-      <div className="rail-bottom"><div className="rail-separator"/><div className="rail-version">V 0.2</div></div>
+      <div className="rail-bottom"><div className="rail-separator"/><div className="rail-version">V 0.3</div></div>
     </aside>
 
     <div className="shell">
       <header className="topbar">
         <div className="brand"><span className="brand-name">APHELION<span className="brand-period">.</span></span><span className="brand-divider"/><span className="brand-sub">ORBITAL DETECTIVE</span></div>
         <div className="topbar-right">
-          <span className="environment-label">EXPERIMENT 002 <span className="small-dot">/</span> GROUND CONTROL</span>
+          <span className="environment-label">EXPERIMENT 003 <span className="small-dot">/</span> ORBIT EXPLORER</span>
           <span className={`realtime-badge ${isNearLive?'is-live':''}`}><span className="realtime-pulse"/>{isNearLive?'REAL-TIME PREDICTION':'SIMULATION TIME'}</span>
           <span className="utc-time"><Clock3 size={13}/> {new Date(simulatedTime).toISOString().slice(11,19)} <small>UTC</small></span>
         </div>
@@ -182,21 +240,23 @@ export default function App(){
       <div className="dashboard">
         <main className="primary-stage">
           <div className="hero-heading">
-            <div className="hero-eyebrow"><span className="teal-line"/> EXPLORATION / 002 <span className="hero-eyebrow-muted">— INTERACTIVE GROUND CONTROL</span></div>
-            <h1>Earth, in motion<span>.</span></h1>
-            <p>Move your ground station. See the geometry respond.</p>
+            <div className="hero-eyebrow"><span className="teal-line"/> EXPLORATION / 003 <span className="hero-eyebrow-muted">— ORBIT EXPLORER</span></div>
+            <h1>{pane==='explore'?'Shape the orbit':'Earth, in motion'}<span>.</span></h1>
+            <p>{pane==='explore'?'Real spacecraft. Hypothetical physics. One interactive Earth.':'Move your ground station. See the geometry respond.'}</p>
           </div>
           <div className="stage-canvas">
-            <Globe mission={mission} station={station} current={current} getTime={getTime} placing={placing}
+            <Globe mission={mission} preview={visiblePreview} station={station} current={current} getTime={getTime} placing={placing}
               onPlace={handlePlace} mask={mask}/>
-            <GroundControl station={station} mask={mask} placing={placing} calculating={loading||!synced}
+            {pane!=='explore'&&<GroundControl station={station} mask={mask} placing={placing} calculating={loading||!synced}
               footprintKm={current ? mission!.coverage.earth_radius_km * current.footprint_deg * Math.PI/180 : null}
-              onTogglePlacing={()=>setPlacing(previous=>!previous)} onMaskChange={setMask}/>
-            <div className="stage-overlay top-left"><span className="holo-label">TARGET ACQUIRED</span><div className="holo-title"><Satellite size={15}/> ISS <span>/ ZARYA</span></div><span className="holo-secondary">NORAD 25544 <span className="holo-sep">·</span> LOW EARTH ORBIT</span></div>
+              onTogglePlacing={()=>setPlacing(previous=>!previous)} onMaskChange={setMask}/>}
+            <button className={`stage-lab-toggle ${pane==='explore'?'active':''}`} onClick={()=>{setPane(pane==='explore'?'orbit':'explore');setPlacing(false);}} type="button"><Orbit size={16}/>{pane==='explore'?'EXIT ORBIT LAB':'OPEN ORBIT EXPLORER'} <span>↗</span></button>
+            {pane==='explore'&&<div className="stage-lab-legend"><span className="stage-lab-legend__virtual"/> APHELION-X · TWO-BODY <span className="stage-lab-legend__real"/> ISS · SGP4</div>}
+            <div className="stage-overlay top-left"><span className="holo-label">{mission ? 'TARGET ACQUIRED' : 'ISS SIGNAL UNAVAILABLE'}</span><div className="holo-title"><Satellite size={15}/> ISS <span>/ ZARYA</span></div><span className="holo-secondary">NORAD 25544 <span className="holo-sep">·</span> LOW EARTH ORBIT</span></div>
             <div className="stage-overlay bottom-left"><div className="coordinate-title">SUBSATELLITE POINT</div><strong>{current?coord(current.lat,true):'— — —'} <span>/</span> {current?coord(current.lon,false):'— — —'}</strong><div className="coordinates-caption">Earth-fixed geographic coordinates</div></div>
-            <div className="stage-overlay bottom-right"><div className="hud-target"><Crosshair size={24} strokeWidth={1.1}/></div><span>SGP4 PROPAGATION<br/>REAL ORBITAL ELEMENTS</span></div>
-            {error && <div className="error-overlay" role="alert"><Info size={24}/><strong>Orbital data unavailable</strong><p>{error}</p><p>Start the Python backend and ensure CelesTrak is reachable. We never fabricate telemetry.</p><button onClick={()=>void fetchMission(getTime(),station,mask)}><RefreshCw size={14}/> Retry connection</button></div>}
-            {loading && !mission&&!error && <div className="loading-overlay"><div className="loading-orbit"/><span>ACQUIRING ORBITAL ELEMENTS</span></div>}
+            <div className="stage-overlay bottom-right"><div className="hud-target"><Crosshair size={24} strokeWidth={1.1}/></div><span>{pane==='explore'?'KEPLER TWO-BODY / VIRTUAL':'SGP4 PROPAGATION / ISS'}<br/>REAL ELEMENTS REMAIN UNCHANGED</span></div>
+            {error && pane!=='explore' && <div className="error-overlay" role="alert"><Info size={24}/><strong>Orbital data unavailable</strong><p>{error}</p><p>Start the Python backend and ensure CelesTrak is reachable. We never fabricate telemetry.</p><button onClick={()=>void fetchMission(getTime(),station,mask)}><RefreshCw size={14}/> Retry connection</button></div>}
+            {loading && !mission&&!error && pane!=='explore' && <div className="loading-overlay"><div className="loading-orbit"/><span>ACQUIRING ORBITAL ELEMENTS</span></div>}
           </div>
 
           <section className="timeline" aria-label="Simulation controls">
@@ -212,15 +272,22 @@ export default function App(){
         <aside className="data-panel" aria-label="Orbital measurements">
           <div className="panel-top">
             <div className="panel-kicker"><span className="teal-dot"/> MISSION CONTROL <span className="panel-serial">001 / ISS</span></div>
-            <div className="panel-sat-heading"><div><small>ACTIVE SPACECRAFT</small><h2>ISS <span>—</span> ZARYA</h2></div><span className="sat-icon"><Satellite size={23} strokeWidth={1.35}/></span></div>
-            <div className="sat-id"><span className="mini-chip">NORAD 25544</span><span className="mini-chip">LEO</span><span className="mini-chip amber">PREDICTED</span></div>
+            <div className="panel-sat-heading"><div><small>{pane==='explore'?'VIRTUAL ORBITAL LAB':'ACTIVE SPACECRAFT'}</small><h2>{pane==='explore'?<>APHELION <span>—</span> X</>:<>ISS <span>—</span> ZARYA</>}</h2></div><span className="sat-icon">{pane==='explore'?<Orbit size={23} strokeWidth={1.35}/>:<Satellite size={23} strokeWidth={1.35}/>}</span></div>
+            <div className="sat-id">{pane==='explore'?<><span className="mini-chip">IDEAL 2-BODY</span><span className="mini-chip">e = 0</span><span className="mini-chip amber">VIRTUAL</span></>:<><span className="mini-chip">NORAD 25544</span><span className="mini-chip">LEO</span><span className="mini-chip amber">PREDICTED</span></>}</div>
           </div>
           <div className="panel-tabs" role="tablist" aria-label="Data panels">
             <button role="tab" aria-selected={pane==='orbit'} className={pane==='orbit'?'active':''} onClick={()=>setPane('orbit')}>TELEMETRY</button>
             <button role="tab" aria-selected={pane==='passes'} className={pane==='passes'?'active':''} onClick={()=>setPane('passes')}>PASSES</button>
             <button role="tab" aria-selected={pane==='science'} className={pane==='science'?'active':''} onClick={()=>setPane('science')}>SCIENCE</button>
+            <button role="tab" aria-selected={pane==='explore'} className={pane==='explore'?'active':''} onClick={()=>{setPane('explore');setPlacing(false);}}>EXPLORER</button>
           </div>
           <AnimatePresence mode="wait">
+            {pane==='explore'&&<OrbitExplorer key="explore" altitude={altitude} inclination={inclination}
+              onAltitude={setAltitude} onInclination={setInclination}
+              onPreset={(h,i)=>{setAltitude(h);setInclination(i);}}
+              preview={preview} loading={previewLoading||!previewSynced} error={previewError}
+              realAltitude={current?.alt_km??null} realPeriod={mission?.satellite.period_minutes??null}
+              onRetry={()=>void fetchPreview(getTime(),altitude,inclination)} />}
             {pane==='orbit'&&<motion.div key="orbit" className="panel-scroll" initial={{opacity:0,y:8}} animate={{opacity:1,y:0}} exit={{opacity:0,y:-6}} transition={{duration:.2}}>
               <div className="measurements-head"><span>ORBITAL TELEMETRY</span><span><span className="green-pip"/> ESTIMATED</span></div>
               <div className="telemetry-grid">
@@ -270,7 +337,7 @@ export default function App(){
           <div className="panel-end"><Waves size={15}/><span>APHELION SCIENCE ENGINE</span><span className="engine-ping"/></div>
         </aside>
       </div>
-      <footer className="bottom-bar"><span>APHELION / EXPERIMENT 002</span><span><span className="small-dot">●</span> REFERENCE FRAME: EARTH FIXED GEOCOORDINATES</span><span><Info size={13}/> EDUCATIONAL ORBITAL PREDICTIONS <span className="bottom-extra">— NOT FLIGHT TELEMETRY</span></span></footer>
+      <footer className="bottom-bar"><span>APHELION / EXPERIMENT 003</span><span><span className="small-dot">●</span> REFERENCE FRAME: EARTH FIXED GEOCOORDINATES</span><span><Info size={13}/> EDUCATIONAL ORBITAL PREDICTIONS <span className="bottom-extra">— NOT FLIGHT TELEMETRY</span></span></footer>
     </div>
   </div>;
 }
