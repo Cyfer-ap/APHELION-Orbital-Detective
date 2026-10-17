@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .orbits import build_mission, safe_satellite
 from .explorer import build_preview
 
-app = FastAPI(title="Orbital Detective API", version="0.5.0")
+app = FastAPI(title="Orbital Detective API", version="0.6.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -17,7 +17,7 @@ app.add_middleware(
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "version": "0.5.0", "mode": "predicted_orbit_not_live_telemetry"}
+    return {"status": "ok", "version": "0.6.0", "mode": "predicted_orbit_not_live_telemetry"}
 
 
 @app.get("/api/mission")
@@ -85,3 +85,16 @@ def compare_orbit(
                                    phase_deg_at_epoch,method,step_seconds,duration_orbits)
     except ValueError as exc:
         raise HTTPException(status_code=422,detail=str(exc)) from exc
+
+
+@app.get('/api/orbit/forensics')
+def forensic_investigation(horizon_hours: int = Query(6, ge=3, le=24)):
+    """Compare SGP4 and a two-body RK4 continuation of one real ISS epoch state."""
+    from .forensics import build_forensics
+    try:
+        sat, provenance = safe_satellite()
+        return build_forensics(sat, provenance, horizon_hours)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Orbital investigation unavailable: {exc}") from exc

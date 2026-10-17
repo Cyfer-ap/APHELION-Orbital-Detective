@@ -134,3 +134,16 @@ export function interpolateLab(track:LabSample[],ms:number):LabSample|null{
   return {time:new Date(ms).toISOString(),lat:lerp(a.lat,b.lat,t),lon:angle(a.lon+180,b.lon+180,t)-180,
     alt_km:lerp(a.alt_km,b.alt_km,t),speed_km_s:lerp(a.speed_km_s,b.speed_km_s,t)};
 }
+
+
+/** Real ISS elements: SGP4 versus two-body RK4 from one identical epoch state. */
+export type ForensicDiagnostic = {elapsed_minutes:number;separation_km:number;radial_km:number;along_track_km:number;cross_track_km:number};
+export type ForensicComparison = {
+  kind:'sgp4_vs_two_body_epoch_comparison';
+  satellite:{name:string;catalog_number:number};epoch_utc:string;
+  provenance:{source:string;epoch_utc:string;cache_status:string;element_age_days:number;propagator:string;telemetry:boolean};
+  model:{horizon_hours:number;sampling_interval_minutes:number;integration_method:'rk4';maximum_integration_step_s:number};
+  reference_track:LabSample[];numerical_track:LabSample[];diagnostics:ForensicDiagnostic[];
+  summary:{final_separation_km:number;max_separation_km:number;max_separation_at_minutes:number;initial_specific_energy_km2_s2:number};
+  assumptions:string[];
+};

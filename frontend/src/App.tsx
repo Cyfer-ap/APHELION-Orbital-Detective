@@ -3,14 +3,15 @@ import { AnimatePresence, motion } from 'motion/react';
 import {
   Activity, ArrowDownRight, ArrowUpRight, ChevronDown, CircleDot, Clock3,
   Crosshair, Globe2, Info, LocateFixed, Pause, Play, Radio,
-  RefreshCw, Satellite, ShieldCheck, Signal, StepBack, StepForward, Waves, Orbit, FlaskConical,
+  RefreshCw, Satellite, ShieldCheck, Signal, StepBack, StepForward, Waves, Orbit, FlaskConical, ScanSearch,
 } from 'lucide-react';
 import Globe from './components/OrbitalGlobe';
 import GroundControl from './components/GroundControl';
 import OrbitExplorer from './components/OrbitExplorer';
 import NumericalLab from './components/NumericalLab';
+import OrbitForensics from './components/OrbitForensics';
 import { coord, interpolate, interpolateLab, interpolatePreview, prettyTime, STATIONS } from './lib/orbit';
-import type { LabComparison, LaboratoryConfig, Mission, OrbitDesign, OrbitPreview, Sample, Station } from './lib/orbit';
+import type { ForensicComparison, LabComparison, LaboratoryConfig, Mission, OrbitDesign, OrbitPreview, Sample, Station } from './lib/orbit';
 import './style.css';
 
 type ClockState={anchor:number; wall:number; speed:number};
@@ -68,7 +69,7 @@ export default function App(){
   const [mission,setMission]=useState<Mission|null>(null);
   const [loading,setLoading]=useState(true);
   const [error,setError]=useState<string|null>(null);
-  const [pane,setPane]=useState<'orbit'|'passes'|'science'|'explore'|'lab'>('orbit');
+  const [pane,setPane]=useState<'orbit'|'passes'|'science'|'explore'|'lab'|'forensics'>('orbit');
   const [design,setDesign]=useState<OrbitDesign>({
     altitude_km: 450, inclination_deg: 51.6, eccentricity: 0.24,
     raan_deg: 35, argument_of_periapsis_deg: 60, phase_deg_at_epoch: 0,
@@ -84,6 +85,11 @@ export default function App(){
   const [labLoading,setLabLoading]=useState(false);
   const [labError,setLabError]=useState<string|null>(null);
   const labRequest=useRef<AbortController|null>(null);
+  const [forensicHorizon,setForensicHorizon]=useState(6);
+  const [forensics,setForensics]=useState<ForensicComparison|null>(null);
+  const [forensicLoading,setForensicLoading]=useState(false);
+  const [forensicError,setForensicError]=useState<string|null>(null);
+  const forensicRequest=useRef<AbortController|null>(null);
 
   const [clock,setClock]=useState<ClockState>({anchor:Date.now(),wall:Date.now(),speed:1});
   const [tick,setTick]=useState(Date.now());
@@ -102,6 +108,8 @@ export default function App(){
   const labSynced=!!comparison&&(Object.keys(design) as (keyof OrbitDesign)[]).every(k=>comparison.parameters[k]===design[k])&&
     (Object.keys(labConfig) as (keyof LaboratoryConfig)[]).every(k=>comparison.model[k]===labConfig[k]);
   const visibleLab=pane==='lab'&&labSynced?comparison:null;
+  const visibleForensics=pane==='forensics'&&forensics?.model.horizon_hours===forensicHorizon?forensics:null;
+  const forensicCurrent=useMemo(()=>visibleForensics?interpolateLab(visibleForensics.reference_track,simulatedTime):null,[visibleForensics,simulatedTime]);
   const labCurrent=useMemo(()=>visibleLab?interpolateLab(visibleLab.reference_track,simulatedTime):null,[visibleLab,simulatedTime]);
   const currentPreview=useMemo(()=>visiblePreview ? interpolatePreview(visiblePreview.track,simulatedTime) : null,[visiblePreview,simulatedTime]);
 
@@ -158,6 +166,28 @@ export default function App(){
     return ()=>window.clearTimeout(timer);
   },[pane,design,labConfig,fetchComparison]);
   useEffect(()=>()=>labRequest.current?.abort(),[]);
+
+  const fetchForensics=useCallback(async (horizon:number)=>{
+    forensicRequest.current?.abort();
+    const controller=new AbortController();forensicRequest.current=controller;
+    setForensicError(null);setForensicLoading(true);
+    try{
+      const response=await fetch(`/api/orbit/forensics?horizon_hours=${horizon}`,{signal:controller.signal});
+      if(!response.ok){const payload=await response.json().catch(()=>({}));
+        throw new Error(typeof payload.detail==='string'?payload.detail:`Forensics error ${response.status}`);}
+      const data:ForensicComparison=await response.json();
+      if(!controller.signal.aborted){
+        setForensics(data);
+        setClock({anchor:Date.parse(data.epoch_utc),wall:Date.now(),speed:120});
+      }
+    }catch(e){if(!controller.signal.aborted)setForensicError(e instanceof Error?e.message:String(e));}
+    finally{if(forensicRequest.current===controller){forensicRequest.current=null;setForensicLoading(false);}}
+  },[]);
+  useEffect(()=>{
+    if(pane!=='forensics')return;
+    void fetchForensics(forensicHorizon);
+  },[pane,forensicHorizon,fetchForensics]);
+  useEffect(()=>()=>forensicRequest.current?.abort(),[]);
 
   useEffect(()=>{
     if(pane!=='explore')return;
@@ -228,6 +258,7 @@ export default function App(){
     return ()=>window.clearInterval(timer);
   },[mission,loading,fetchMission,getTime,station,mask,isNearLive]);
 
+  const openForensics=()=>{setPlacing(false);setPane('forensics');};
   const openLab=()=>{
     if(pane==='lab')return;
     setPlacing(false);setPane('lab');
@@ -238,6 +269,11 @@ export default function App(){
     const end=Date.parse(visibleLab.reference_track.at(-1)!.time);
     if(simulatedTime>end){setClock({anchor:previewEpoch.current,wall:Date.now(),speed:clock.speed});}
   },[pane,visibleLab,clock.speed,simulatedTime]);
+  useEffect(()=>{
+    if(pane!=='forensics'||!visibleForensics||clock.speed<=0)return;
+    const end=Date.parse(visibleForensics.reference_track.at(-1)!.time);
+    if(simulatedTime>end){setClock({anchor:Date.parse(visibleForensics.epoch_utc),wall:Date.now(),speed:clock.speed});}
+  },[pane,visibleForensics,clock.speed,simulatedTime]);
   const setSpeed=(speed:number)=>setClock({anchor:getTime(),wall:Date.now(),speed});
   const step=(deltaMs:number)=>{
     const target=getTime()+deltaMs;
@@ -261,7 +297,7 @@ export default function App(){
       void fetchMission(target,station,mask);
     setPane('orbit');
   };
-  const timelineSamples=pane==='lab'?visibleLab?.reference_track:pane==='explore'?visiblePreview?.track:mission?.track;
+  const timelineSamples=pane==='forensics'?visibleForensics?.reference_track:pane==='lab'?visibleLab?.reference_track:pane==='explore'?visiblePreview?.track:mission?.track;
   const trackStart=timelineSamples?Date.parse(timelineSamples[0].time):0;
   const trackEnd=timelineSamples?Date.parse(timelineSamples[timelineSamples.length-1].time):0;
   const sliderValue=Math.min(trackEnd,Math.max(trackStart,simulatedTime));
@@ -277,15 +313,16 @@ export default function App(){
         <button aria-label="Science details" title="Science details" className={`rail-item ${pane==='science'?'active':''}`} onClick={()=>setPane('science')}><Activity size={20}/></button>
         <button aria-label="Virtual orbit explorer" title="Orbit explorer" className={`rail-item ${pane==='explore'?'active':''}`} onClick={()=>setPane('explore')}><Orbit size={20}/></button>
         <button aria-label="Numerical laboratory" title="Numerical laboratory" className={`rail-item ${pane==='lab'?'active':''}`} onClick={openLab}><FlaskConical size={20}/></button>
+        <button aria-label="Orbit forensics" title="Orbit forensics" className={`rail-item ${pane==='forensics'?'active':''}`} onClick={openForensics}><ScanSearch size={20}/></button>
       </div>
-      <div className="rail-bottom"><div className="rail-separator"/><div className="rail-version">V 0.5</div></div>
+      <div className="rail-bottom"><div className="rail-separator"/><div className="rail-version">V 0.6</div></div>
     </aside>
 
     <div className="shell">
       <header className="topbar">
         <div className="brand"><span className="brand-name">APHELION<span className="brand-period">.</span></span><span className="brand-divider"/><span className="brand-sub">ORBITAL DETECTIVE</span></div>
         <div className="topbar-right">
-          <span className="environment-label">EXPERIMENT 005 <span className="small-dot">/</span> NUMERICAL LAB</span>
+          <span className="environment-label">EXPERIMENT 006 <span className="small-dot">/</span> ORBIT FORENSICS</span>
           <span className={`realtime-badge ${isNearLive?'is-live':''}`}><span className="realtime-pulse"/>{isNearLive?'REAL-TIME PREDICTION':'SIMULATION TIME'}</span>
           <span className="utc-time"><Clock3 size={13}/> {new Date(simulatedTime).toISOString().slice(11,19)} <small>UTC</small></span>
         </div>
@@ -294,25 +331,27 @@ export default function App(){
       <div className="dashboard">
         <main className="primary-stage">
           <div className="hero-heading">
-            <div className="hero-eyebrow"><span className="teal-line"/> EXPLORATION / 005 <span className="hero-eyebrow-muted">— NUMERICAL LAB</span></div>
-            <h1>{pane==='lab'?'Chasing precision':pane==='explore'?'Design the impossible':'Earth, in motion'}<span>.</span></h1>
-            <p>{pane==='lab'?'Compare an exact orbit against three numerical methods.':pane==='explore'?'Draw an ellipse through the sky. Science gives it motion.':'Move your ground station. See the geometry respond.'}</p>
+            <div className="hero-eyebrow"><span className="teal-line"/> EXPLORATION / 006 <span className="hero-eyebrow-muted">— ORBIT FORENSICS</span></div>
+            <h1>{pane==='forensics'?'Investigate the orbit':pane==='lab'?'Chasing precision':pane==='explore'?'Design the impossible':'Earth, in motion'}<span>.</span></h1>
+            <p>{pane==='forensics'?'Two models. One epoch. What changes with time?':pane==='lab'?'Compare an exact orbit against three numerical methods.':pane==='explore'?'Draw an ellipse through the sky. Science gives it motion.':'Move your ground station. See the geometry respond.'}</p>
           </div>
           <div className="stage-canvas">
-            <Globe mission={pane==='lab'?null:mission} preview={visiblePreview} comparison={visibleLab} station={station} current={current} getTime={getTime} placing={placing}
+            <Globe mission={pane==='lab'||pane==='forensics'?null:mission} preview={visiblePreview} comparison={visibleLab} forensics={visibleForensics} station={station} current={current} getTime={getTime} placing={placing}
               onPlace={handlePlace} mask={mask}/>
-            {pane!=='explore'&&pane!=='lab'&&<GroundControl station={station} mask={mask} placing={placing} calculating={loading||!synced}
+            {pane!=='explore'&&pane!=='lab'&&pane!=='forensics'&&<GroundControl station={station} mask={mask} placing={placing} calculating={loading||!synced}
               footprintKm={current ? mission!.coverage.earth_radius_km * current.footprint_deg * Math.PI/180 : null}
               onTogglePlacing={()=>setPlacing(previous=>!previous)} onMaskChange={setMask}/>}
             <button className={`stage-lab-toggle ${pane==='explore'?'active':''}`} onClick={()=>{setPane(pane==='explore'?'orbit':'explore');setPlacing(false);}} type="button"><Orbit size={16}/>{pane==='explore'?'EXIT MISSION DESIGNER':'OPEN MISSION DESIGNER'} <span>↗</span></button>
             <button className={`stage-lab-toggle stage-num-toggle ${pane==='lab'?'active':''}`} onClick={pane==='lab'?()=>setPane('explore'):openLab} type="button"><FlaskConical size={16}/>{pane==='lab'?'EXIT NUMERICAL LAB':'OPEN NUMERICAL LAB'} <span>↗</span></button>
+            {pane==='forensics'&&<div className="stage-lab-legend forensic-stage-legend"><span className="stage-lab-legend__virtual"/> SGP4 · CelesTrak ELEMENTS <span className="stage-lab-legend__real num-legend"/> TWO-BODY · RK4</div>}
             {pane==='lab'&&<div className="stage-lab-legend"><span className="stage-lab-legend__virtual"/> ANALYTIC REFERENCE <span className="stage-lab-legend__real num-legend"/> NUMERICAL {labConfig.method.toUpperCase()}</div>}
+            <button className={`stage-lab-toggle forensic-stage-toggle ${pane==='forensics'?'active':''}`} onClick={pane==='forensics'?()=>setPane('orbit'):openForensics} type="button"><ScanSearch size={16}/>{pane==='forensics'?'EXIT ORBIT FORENSICS':'OPEN ORBIT FORENSICS'} <span>↗</span></button>
             {pane==='explore'&&<div className="stage-lab-legend"><span className="stage-lab-legend__virtual"/> APHELION-X · ELLIPTIC TWO-BODY <span className="stage-lab-legend__real"/> ISS · SGP4</div>}
-            <div className="stage-overlay top-left"><span className="holo-label">{pane==='lab'?'VIRTUAL EXPERIMENT':mission?'TARGET ACQUIRED':'ISS SIGNAL UNAVAILABLE'}</span><div className="holo-title">{pane==='lab'?<><FlaskConical size={15}/> TWO-BODY <span>/ LABORATORY</span></>:<><Satellite size={15}/> ISS <span>/ ZARYA</span></>}</div><span className="holo-secondary">{pane==='lab'?'ANALYTIC VS. NUMERICAL · SAME INITIAL STATE':<>NORAD 25544 <span className="holo-sep">·</span> LOW EARTH ORBIT</>}</span></div>
-            <div className="stage-overlay bottom-left"><div className="coordinate-title">{pane==='lab'?'REFERENCE SUBSATELLITE POINT':'SUBSATELLITE POINT'}</div><strong>{pane==='lab'?(labCurrent?coord(labCurrent.lat,true):'— — —'):(current?coord(current.lat,true):'— — —')} <span>/</span> {pane==='lab'?(labCurrent?coord(labCurrent.lon,false):'— — —'):(current?coord(current.lon,false):'— — —')}</strong><div className="coordinates-caption">Earth-fixed geographic coordinates</div></div>
-            <div className="stage-overlay bottom-right"><div className="hud-target"><Crosshair size={24} strokeWidth={1.1}/></div><span>{pane==='lab'?'TWO-BODY INTEGRATION / ECI':pane==='explore'?'ELLIPTIC TWO-BODY / VIRTUAL':'SGP4 PROPAGATION / ISS'}<br/>REAL ELEMENTS REMAIN UNCHANGED</span></div>
-            {error && pane!=='explore' && pane!=='lab' && <div className="error-overlay" role="alert"><Info size={24}/><strong>Orbital data unavailable</strong><p>{error}</p><p>Start the Python backend and ensure CelesTrak is reachable. We never fabricate telemetry.</p><button onClick={()=>void fetchMission(getTime(),station,mask)}><RefreshCw size={14}/> Retry connection</button></div>}
-            {loading && !mission&&!error && pane!=='explore' && pane!=='lab' && <div className="loading-overlay"><div className="loading-orbit"/><span>ACQUIRING ORBITAL ELEMENTS</span></div>}
+            <div className="stage-overlay top-left"><span className="holo-label">{pane==='forensics'?'MODEL COMPARISON':pane==='lab'?'VIRTUAL EXPERIMENT':mission?'TARGET ACQUIRED':'ISS SIGNAL UNAVAILABLE'}</span><div className="holo-title">{pane==='forensics'?<><ScanSearch size={15}/> ISS <span>/ ORBIT FORENSICS</span></>:pane==='lab'?<><FlaskConical size={15}/> TWO-BODY <span>/ LABORATORY</span></>:<><Satellite size={15}/> ISS <span>/ ZARYA</span></>}</div><span className="holo-secondary">{pane==='forensics'?'SAME GCRS EPOCH STATE · DISTINCT MODELS':pane==='lab'?'ANALYTIC VS. NUMERICAL · SAME INITIAL STATE':<>NORAD 25544 <span className="holo-sep">·</span> LOW EARTH ORBIT</>}</span></div>
+            <div className="stage-overlay bottom-left"><div className="coordinate-title">{pane==='forensics'?'SGP4 SUBSATELLITE POINT':pane==='lab'?'REFERENCE SUBSATELLITE POINT':'SUBSATELLITE POINT'}</div><strong>{pane==='forensics'?(forensicCurrent?coord(forensicCurrent.lat,true):'— — —'):pane==='lab'?(labCurrent?coord(labCurrent.lat,true):'— — —'):(current?coord(current.lat,true):'— — —')} <span>/</span> {pane==='forensics'?(forensicCurrent?coord(forensicCurrent.lon,false):'— — —'):pane==='lab'?(labCurrent?coord(labCurrent.lon,false):'— — —'):(current?coord(current.lon,false):'— — —')}</strong><div className="coordinates-caption">Earth-fixed geographic coordinates</div></div>
+            <div className="stage-overlay bottom-right"><div className="hud-target"><Crosshair size={24} strokeWidth={1.1}/></div><span>{pane==='forensics'?'GCRS MODEL DISCREPANCY / ISS':pane==='lab'?'TWO-BODY INTEGRATION / ECI':pane==='explore'?'ELLIPTIC TWO-BODY / VIRTUAL':'SGP4 PROPAGATION / ISS'}<br/>REAL ELEMENTS REMAIN UNCHANGED</span></div>
+            {error && pane!=='explore' && pane!=='lab' && pane!=='forensics' && <div className="error-overlay" role="alert"><Info size={24}/><strong>Orbital data unavailable</strong><p>{error}</p><p>Start the Python backend and ensure CelesTrak is reachable. We never fabricate telemetry.</p><button onClick={()=>void fetchMission(getTime(),station,mask)}><RefreshCw size={14}/> Retry connection</button></div>}
+            {loading && !mission&&!error && pane!=='explore' && pane!=='lab' && pane!=='forensics' && <div className="loading-overlay"><div className="loading-orbit"/><span>ACQUIRING ORBITAL ELEMENTS</span></div>}
           </div>
 
           <section className="timeline" aria-label="Simulation controls">
@@ -327,9 +366,9 @@ export default function App(){
 
         <aside className="data-panel" aria-label="Orbital measurements">
           <div className="panel-top">
-            <div className="panel-kicker"><span className="teal-dot"/> MISSION CONTROL <span className="panel-serial">{pane==='lab'?'005 / LAB':'001 / ISS'}</span></div>
-            <div className="panel-sat-heading"><div><small>{pane==='lab'?'NUMERICAL EXPERIMENT':pane==='explore'?'VIRTUAL ORBITAL LAB':'ACTIVE SPACECRAFT'}</small><h2>{pane==='lab'?<>INTEGRATION <span>—</span> LAB</>:pane==='explore'?<>APHELION <span>—</span> X</>:<>ISS <span>—</span> ZARYA</>}</h2></div><span className="sat-icon">{pane==='lab'?<FlaskConical size={23} strokeWidth={1.35}/>:pane==='explore'?<Orbit size={23} strokeWidth={1.35}/>:<Satellite size={23} strokeWidth={1.35}/>}</span></div>
-            <div className="sat-id">{pane==='lab'?<><span className="mini-chip">NUMERICAL / ANALYTIC</span><span className="mini-chip amber">ECI</span></>:pane==='explore'?<><span className="mini-chip">IDEAL 2-BODY</span><span className="mini-chip">e = {design.eccentricity.toFixed(3)}</span><span className="mini-chip amber">VIRTUAL</span></>:<><span className="mini-chip">NORAD 25544</span><span className="mini-chip">LEO</span><span className="mini-chip amber">PREDICTED</span></>}</div>
+            <div className="panel-kicker"><span className="teal-dot"/> MISSION CONTROL <span className="panel-serial">{pane==='forensics'?'006 / FORENSICS':pane==='lab'?'005 / LAB':'001 / ISS'}</span></div>
+            <div className="panel-sat-heading"><div><small>{pane==='forensics'?'SGP4 / TWO-BODY':pane==='lab'?'NUMERICAL EXPERIMENT':pane==='explore'?'VIRTUAL ORBITAL LAB':'ACTIVE SPACECRAFT'}</small><h2>{pane==='forensics'?<>ORBIT <span>—</span> FORENSICS</>:pane==='lab'?<>INTEGRATION <span>—</span> LAB</>:pane==='explore'?<>APHELION <span>—</span> X</>:<>ISS <span>—</span> ZARYA</>}</h2></div><span className="sat-icon">{pane==='forensics'?<ScanSearch size={23} strokeWidth={1.35}/>:pane==='lab'?<FlaskConical size={23} strokeWidth={1.35}/>:pane==='explore'?<Orbit size={23} strokeWidth={1.35}/>:<Satellite size={23} strokeWidth={1.35}/>}</span></div>
+            <div className="sat-id">{pane==='forensics'?<><span className="mini-chip">REAL ELEMENTS</span><span className="mini-chip amber">MODEL COMPARISON</span></>:pane==='lab'?<><span className="mini-chip">NUMERICAL / ANALYTIC</span><span className="mini-chip amber">ECI</span></>:pane==='explore'?<><span className="mini-chip">IDEAL 2-BODY</span><span className="mini-chip">e = {design.eccentricity.toFixed(3)}</span><span className="mini-chip amber">VIRTUAL</span></>:<><span className="mini-chip">NORAD 25544</span><span className="mini-chip">LEO</span><span className="mini-chip amber">PREDICTED</span></>}</div>
           </div>
           <div className="panel-tabs" role="tablist" aria-label="Data panels">
             <button role="tab" aria-selected={pane==='orbit'} className={pane==='orbit'?'active':''} onClick={()=>setPane('orbit')}>TELEMETRY</button>
@@ -337,8 +376,13 @@ export default function App(){
             <button role="tab" aria-selected={pane==='science'} className={pane==='science'?'active':''} onClick={()=>setPane('science')}>SCIENCE</button>
             <button role="tab" aria-selected={pane==='explore'} className={pane==='explore'?'active':''} onClick={()=>{setPane('explore');setPlacing(false);}}>DESIGNER</button>
             <button role="tab" aria-selected={pane==='lab'} className={pane==='lab'?'active':''} onClick={openLab}>LAB</button>
+            <button role="tab" aria-selected={pane==='forensics'} className={pane==='forensics'?'active':''} onClick={openForensics}>DETECTIVE</button>
           </div>
           <AnimatePresence mode="wait">
+            {pane==='forensics'&&<OrbitForensics key="forensics" data={forensics} loading={forensicLoading}
+              error={forensicError} horizon={forensicHorizon} time={simulatedTime}
+              onHorizon={setForensicHorizon} onJump={at=>setClock({anchor:at,wall:Date.now(),speed:0})}
+              onRetry={()=>void fetchForensics(forensicHorizon)}/>}
             {pane==='lab'&&<NumericalLab key="lab" comparison={comparison} config={labConfig} design={design} loading={labLoading||!labSynced}
               error={labError} time={simulatedTime} onConfig={patch=>setLabConfig(old=>({...old,...patch}))}
               onRetry={()=>void fetchComparison(design,labConfig)} onJump={at=>setClock({anchor:at,wall:Date.now(),speed:0})}

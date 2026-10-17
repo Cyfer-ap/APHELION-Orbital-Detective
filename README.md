@@ -227,3 +227,23 @@ Available methods are first-order **forward Euler**, second-order **velocity Ver
 **Tests:** From `backend/`, run `python -m pytest -q tests/test_numerical.py` to verify the engine, invariants, method ranking, convergence, and invalid parameter rejection. The API-contract test requires the installed backend dependencies. Run `npm run build` inside `frontend/` to verify frontend typing/bundling.
 
 The lab is ideal two-body mechanics—not SGP4, a perturbation model, operational orbit determination, or real satellite tracking. No collision safety conclusions should be drawn from it.
+
+## Orbit Forensics v0.6 — SGP4 versus two-body physics
+
+Select **DETECTIVE** or **OPEN ORBIT FORENSICS**. APHELION acquires real ISS orbital elements (CelesTrak), takes one SGP4 GCRS epoch state, and propagates it twice: SGP4 vs an unperturbed two-body RK4 solution. Select 3, 6, 12, or 24 hours; inspect both moving trajectories and click/scrub the model-separation chart to jump to any sample. Read the signed Radial / Along-track / Cross-track differences and the original element epoch/age. Backend API: `GET /api/orbit/forensics?horizon_hours=6`.
+
+**Interpretation:** Model separation is **not** observational error, a detected orbit maneuver, or an estimated collision risk. The two models deliberately omit/include different perturbation treatments. Both globe paths are WGS84 geographic projections of the predicted GCRS states. The tool does not compare historical GP snapshots yet. If elements are unavailable, the UI shows a retriable data error, never fabricated satellite telemetry.
+
+Targeted check from repository root:
+
+```bash
+cd backend
+python -m pytest -q tests/test_forensics.py tests/test_numerical.py
+```
+
+Build frontend after dependencies are installed (as in initial setup):
+
+```bash
+cd frontend
+npm run build
+```
