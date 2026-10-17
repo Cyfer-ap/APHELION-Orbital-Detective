@@ -4,9 +4,11 @@
 
 > **Project rule:** Every new scientific/backend capability ships in the same vertical slice as its polished, interactive UI. We will not build the entire backend first and add a frontend later.
 
-## What exists in v0.3
+## What exists in v0.4
 
-- **Orbit Explorer v0.3:** Adjust hypothetical circular-orbit altitude (200–2000 km) and inclination (0°–180°), select presets, and immediately compare live backend-computed Keplerian speed and period with the ISS. A violet orbit-plane ring, rotating-Earth ground trail, and moving virtual spacecraft appear alongside the real ISS.
+- **Mission Designer v0.4:** Design a virtual **elliptical** satellite trajectory by changing perigee altitude (200–2000 km), eccentricity (0–0.35), inclination (0–180°), right ascension of ascending node Ω (0–360°), argument of periapsis ω (0–360°), and initial true anomaly ν₀ (0–360°). The Python backend solves Kepler's equation and computes vis-viva speed, apogee/perigee, period, and Earth-fixed trajectories.
+- **Integrated UI:** Violet 3D ellipse, illuminated perigee/apogee markers, moving satellite, synchronized telemetry, eccentricity-sensitive orbit schematic, four presets and time scrubbing even if ISS data is unavailable.
+- **Previous v0.3 circular Orbit Explorer** remains a preset (set eccentricity to zero). Earlier ISS and ground-control visualizations are preserved.
 - Interactive, stylized **3D Earth** with orbit/ground-track visualization and a predicted ISS position marker.
 - Real **ISS orbital propagation** via Skyfield/SGP4 using CelesTrak orbital elements (not live telemetry).
 - **Simulation controls** for pausing, scrubbing, stepping and accelerating time.
@@ -18,7 +20,7 @@
 - Click a predicted pass to jump to its peak and pause the timeline.
 - Telemetry, passes, and science/provenance views, with clear data-source and cache status.
 
-The Earth texture, star field, atmosphere, visual glow, and animation styling are illustrative; calculated spacecraft states are model predictions. This application is for exploration and education, not satellite operations or collision avoidance.
+The Earth texture, star field, atmosphere, visual glow, and animation styling are illustrative; calculated spacecraft states are model predictions. The virtual orbit is an ideal unperturbed Keplerian model with a spherical Earth and approximate Greenwich sidereal angle. This application is for exploration and education, not satellite operations or collision avoidance.
 
 Full scope, release roadmap, scientific assumptions, and the UI/backend development contract: **[guides/PROJECT_PLAN.md](guides/PROJECT_PLAN.md)**.
 
@@ -28,7 +30,7 @@ Full scope, release roadmap, scientific assumptions, and the UI/backend developm
 - **Node.js 20.19+** (Node 22 recommended) and npm
 - **Python 3.11+** and pip
 - A browser with **WebGL** enabled
-- Internet access on first run to retrieve ISS data from CelesTrak. **The virtual Orbit Explorer operates without CelesTrak data.**
+- Internet access on first run to retrieve ISS data from CelesTrak. **The virtual Mission Designer operates without CelesTrak data.**
 
 ## Clone the repository
 
@@ -92,7 +94,10 @@ Open **http://localhost:5173** in your browser. Keep both terminal processes run
 4. Click **PLACE ON 3D EARTH** in the floating Ground Control panel, then click any point on the planet to move the virtual station.
 5. Drag the **MIN. ELEVATION** slider from 0° to 30° and watch the footprint, contact margin, elevation graph, and passes respond.
 6. Open **Passes**, then click a pass card to jump to the predicted peak.
-7. Open **Science** to inspect propagation, orbital-element epoch, cache provenance, and footprint assumptions.
+7. Open **Mission Designer** to see a virtual elliptical orbit. Choose ELLIPTICAL, move the eccentricity slider, and inspect the violet ellipse and perigee/apogee markers.
+8. Change Ω and ω; watch the orientation and apsides rotate. Set ν₀ to change the starting spacecraft position. Scrub time to watch speed and altitude vary between perigee and apogee.
+9. Select **CIRCULAR** and verify that perigee and apogee coincide and the speed becomes constant.
+10. Open **Science** to inspect ISS propagation, orbital-element epoch, cache provenance, and footprint assumptions.
 
 ## Tests and validation
 
@@ -110,7 +115,7 @@ cd frontend
 npm run build
 ```
 
-**Current verification:** Initial source files have passed basic Python and TypeScript syntax-level checks. A full dependency-installed runtime and integration validation is still required on a local machine. If something fails, report the console output and we will fix it before expanding scope.
+**Current verification:** The v0.4 orbital numerical checks run without external data. Full integration (`pytest`, React production build, and browser testing) should be verified locally after installing dependencies. If something fails, report the console output and we will fix it before expanding scope.
 
 ## Project structure
 
@@ -122,7 +127,7 @@ npm run build
 ├── backend/
 │   ├── app/main.py              # FastAPI endpoints
 │   ├── app/orbits.py            # Real SGP4 propagation and visibility calculations
-│   ├── app/explorer.py          # Independently computed circular two-body preview
+│   ├── app/explorer.py          # Independently computed elliptical two-body preview
 │   ├── tests/                  # Mathematical and offline API contract checks
 │   └── requirements.txt
 ├── frontend/
@@ -148,7 +153,7 @@ npm run build
 
 ## Scope discipline
 
-This is a personal scientific playground, **not a SaaS**. No authentication, payment features, accounts, or production infrastructure unless they become essential to a specific experiment. v0.3 adds the **virtual circular-orbit explorer and animated comparison** alongside v0.2 Ground Control. Next proposed slice: mission design, after local verification of this release.
+This is a personal scientific playground, **not a SaaS**. No authentication, payment features, accounts, or production infrastructure unless they become essential to a specific experiment. v0.4 extends the circular orbit experiment into a configurable **elliptical Mission Designer**. The next potential slice is numerical propagation and error visualization, after local verification.
 
 ## Scientific limitations
 
@@ -165,15 +170,40 @@ Optional `at=` must be timezone-aware ISO 8601. Input coordinates are validated 
 
 ## Orbit Explorer v0.3 — a complete backend + animated UI slice
 
-In the right panel, choose **EXPLORER** (or click **OPEN ORBIT EXPLORER** over the globe). Drag the altitude and inclination sliders or select a preset. The browser requests an orbit computation from Python, then updates the violet orbital plane, dashed Earth-fixed ground trail, animated APHELION-X satellite, period and speed metrics, and comparison against the independently propagated ISS. The real ISS is **never** modified by changing the virtual orbit.
+For the original circular v0.3 experiment, open **DESIGNER** (or click **OPEN MISSION DESIGNER** over the globe), choose **CIRCULAR**, and keep eccentricity at zero. Drag the altitude and inclination sliders or select a preset. The browser requests an orbit computation from Python, then updates the violet reference ellipse (circular when e=0), dashed Earth-fixed ground trail, animated APHELION-X satellite, period and speed metrics, and comparison against the independently propagated ISS. The real ISS is **never** modified by changing the virtual orbit.
 
-- **Violet solid circle:** The circular orbital-plane reference with Earth held fixed at the calculation instant.
+- **Violet solid orbit:** The circular orbital-plane reference in the e=0 preset with Earth held fixed at the calculation instant.
 - **Violet dashed line:** Earth-fixed sub-satellite ground track, accounting for Earth's rotation.
 - **Amber spacecraft:** Real ISS / published CelesTrak elements / SGP4.
 - **Kepler panel:** Idealized 2-body orbit (eccentricity=0, RAAN=0, initial anomaly=0 at a fixed experiment epoch), with `μ=398600.4418 km³/s²`, spherical Earth radius `6371 km`.
 
-**Endpoint:** `GET /api/orbit/preview?altitude_km=550&inclination_deg=51.6&at=2026-10-18T00:00:00Z&epoch=2026-10-18T00:00:00Z`. `at` and `epoch` are optional, but any provided value must be timezone-aware. The chosen epoch is held constant in the client so time navigation does not reset the virtual spacecraft's phase. The default orbit returns a state, Kepler-derived period/speed, 241 trajectory samples, a 129-point frozen-instant plane, and explicit scientific assumptions. Input limits are validated by FastAPI and the engine; times may be at most 30 days from the experiment epoch.
+**Endpoint:** `GET /api/orbit/preview?altitude_km=550&inclination_deg=51.6&at=2026-10-18T00:00:00Z&epoch=2026-10-18T00:00:00Z`. `at` and `epoch` are optional, but any provided value must be timezone-aware. The chosen epoch is held constant in the client so time navigation does not reset the virtual spacecraft's phase. The default orbit returns a state, Kepler-derived period/speed, 241 trajectory samples, a 193-point frozen-instant reference ellipse, and explicit scientific assumptions. Input limits are validated by FastAPI and the engine; times may be at most 30 days from the experiment epoch.
 
 **Limitations:** This circular model is **not** SGP4, an orbital maneuver calculator, or a precision Earth-orientation model. The conversion from the model's inertial frame to Earth-fixed latitude/longitude uses a simplified sidereal rotation (UTC approximates UT1; precession, nutation and polar motion ignored). Earth is taken to be spherical; the real ISS uses Skyfield's WGS84-based geodetic observations. The 3D scene projects geographic positions onto a stylized globe; visual interpolation is not numerical propagation.
 
 Run backend tests with `cd backend && python -m pytest -q`, and build-check the frontend with `cd frontend && npm run build`.
+
+## Mission Designer v0.4 — mathematical contract
+
+For a perigee altitude `h_p`, Earth's **reference spherical** radius `R=6371 km`, and eccentricity `0≤e≤0.35`, the virtual orbit has
+
+`r_p = R + h_p`, `a = r_p/(1-e)`, `r_a = a(1+e)`, `n=√(μ/a³)`, `T=2π/n`,
+
+where `μ = 398600.4418 km³/s²`. The initial phase is the true anomaly ν₀ at a fixed experiment epoch (it is **not** the mean anomaly). We convert ν₀ to a mean anomaly M₀, evolve `M(t)=M₀+n(t−epoch)`, solve `M=E−e sin(E)` by Newton iteration and recover ν(t). We compute `r=a(1−e cos(E))` and `v=√(μ(2/r−1/a))`, with inertial orientation specified by Ω, i, ω.
+
+The 3D **ellipse and apsides are a geometric snapshot**, frozen in the Earth-fixed orientation at the request time, while the ground track changes with Earth's rotation. Display-state animation interpolates backend time samples. This is a visualization of a two-body model, not a propagation model for the real ISS; it omits J₂, drag, maneuvers, nutation and polar motion.
+
+API example (UTC times must include Z or a timezone):
+
+```text
+GET /api/orbit/preview?altitude_km=450&inclination_deg=51.6&eccentricity=0.24&raan_deg=35&argument_of_periapsis_deg=60&phase_deg_at_epoch=0
+```
+
+To run mathematical tests independent of external orbital-element downloads:
+
+```bash
+cd backend
+python -m pytest -q tests/test_mission_designer.py
+```
+
+Run the complete backend suite after installing `backend/requirements.txt`.

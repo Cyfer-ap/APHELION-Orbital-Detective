@@ -1,6 +1,6 @@
 # APHELION — Vision, Scientific Architecture & Development Plan
 
-**Status:** v0.2 Ground Control implemented; local runtime validation is the next checkpoint  
+**Status:** v0.4 Mission Designer implemented; local runtime / browser verification remains the next checkpoint  
 **Project identity:** Orbital Detective / APHELION  
 **Type:** Personal, interactive scientific playground, not a production satellite operations tool
 
@@ -76,7 +76,7 @@ A feature is **not complete** after only step 2. The preferred unit of progress 
 | **0.1 · First Contact** (initial code) | CelesTrak ISS TLE retrieval/cache; SGP4 state/ground track; observer angles and pass windows | 3D globe, moving ISS marker, animated trail, time control, station switcher, telemetry, passes and provenance screens | Positions and pass data appear in UI; errors surfaced; math checks run |
 | **0.2 · Ground Control** | Arbitrary station coordinates, configurable elevation mask, visibility windows | **Click/drag station** on globe; animated horizon/visibility cone; real-time pass/geometry updates; fine mask slider | Moving a station or changing mask updates the full view consistently |
 | **0.3 · Orbit Explorer** (implemented) | Circular two-body inclination, semimajor axis/altitude, speed and period; validated state and epoch; Earth-fixed track | Altitude/inclination presets and sliders; animated violet spacecraft, tilted frozen-instant orbital plane and Earth-fixed ground trail; ISS comparison | Slider interaction triggers computation, visuals and numerical readouts together |
-| **0.4 · Mission Designer** | Two-body Keplerian virtual-satellite propagator and configurable initial conditions | Create CHACHA-SAT-01; manipulate orbital parameters; animate physical effects | Simulated satellite model visibly responds to parameters and passes checks |
+| **0.4 · Mission Designer** (implemented) | Elliptical two-body propagation with eccentricity, i, Ω, ω, initial true anomaly, apsis distance and vis-viva speed | APHELION-X shape/plane/phase sliders, eccentricity diagram, illuminated apsis markers and speed readout | Compute state in Python, animate on 3D Earth and display synchronized results in the same slice |
 | **0.5 · Orbital Laboratory** | Numerical two-body integrator; compare with analytic baseline; diagnostic invariants | Split/overlay trajectory comparisons; interactive error plots and time controls | Explanatory comparison plots agree with controlled reference cases |
 | **0.6 · Orbital Detective** | Compare time-separated element sets and propagated positions; compute deviations | Visual "investigation" missions with orbit overlays and discrepancy timeline | User can inspect prediction differences without mistaking them for proven maneuvers |
 
@@ -142,7 +142,7 @@ README.md                  # Installation and run instructions
 
 ## 8. Next action
 
-Verify **v0.3 Orbit Explorer** locally and resolve integration bugs before v0.4. Ground Control includes arbitrary point placement via globe raycasting (click, not drag), 0°–30° mask input, backend-recomputed WGS84 line-of-sight and passes, contact-margin readings, a spherical-reference footprint visualization, and pass-to-peak timeline navigation. Do not begin a backend-only sprint.
+Verify **v0.4 Mission Designer** locally and resolve integration bugs before starting v0.5. Ground Control includes arbitrary point placement via globe raycasting (click, not drag), 0°–30° mask input, backend-recomputed WGS84 line-of-sight and passes, contact-margin readings, a spherical-reference footprint visualization, and pass-to-peak timeline navigation. Do not begin a backend-only sprint.
 
 
 ## 9. v0.2 Ground Control — mathematical/visual contract
@@ -182,3 +182,17 @@ The animated **solid violet orbital-plane ring** freezes the terrestrial orienta
 The Python endpoint `GET /api/orbit/preview` validates both parameters and timezone-aware timestamps, independently constructs 241 UTC trajectory samples and 129 frozen-plane points and returns inputs, derived parameters and assumptions. The React side debounces requests, aborts superseded requests, never displays stale orbit results against new sliders, and interpolates only within a known sampled window.
 
 **Validation:** Kepler's third law, altitude–period monotonicity, altitude–speed monotonicity, maximum inclination latitude, sidereal rotation over six hours, API shape, and invalid parameter/time rejection. Next possible extension (v0.4) permits eccentricity and independent RAAN/initial anomaly, explicitly labeled as a more general orbit model rather than modifying the ISS.
+
+## 11. v0.4 Mission Designer — mathematical and interface contract
+
+**Design decisions:** `altitude_km` is now explicitly the **perigee altitude** of the virtual orbit; circular v0.3 results remain unchanged for `e=0`. Input bounds are perigee altitude 200–2000 km, eccentricity 0–0.35, inclination 0–180°, and Ω, ω, ν₀ within 0–360°. ν₀ is the **true anomaly at the experiment epoch**. We do not represent e>0 with a fixed circular radius. We keep operational ISS propagation separate (SGP4).
+
+**Computation:** with spherical reference Earth radius `R`, perigee radius `r_p=R+h_p`, semimajor axis `a=r_p/(1−e)`, apogee radius `r_a=a(1+e)`, gravitational parameter `μ=398600.4418 km³/s²`, mean motion `n=√(μ/a³)`, and period `T=2π/n`. Convert ν₀ to E₀ and mean anomaly `M₀=E₀−e sin E₀`. Advance `M(t)=M₀+n(t−t₀)`; solve Kepler's equation `M=E−e sin E` numerically; convert to ν and `r=a(1−e cos E)`. Instantaneous speed follows the vis-viva relation `v²=μ(2/r−1/a)`. Perifocal position rotates into inertial space through `R₃(Ω)R₁(i)R₃(ω)` and into approximate Earth-fixed coordinates using GMST. No J₂/drag/thrust modeling is claimed.
+
+**API / backend:** Existing `GET /api/orbit/preview` extended with `eccentricity`, `raan_deg`, `argument_of_periapsis_deg`, `phase_deg_at_epoch`; backward-compatible defaults restore circular v0.3 physics. Backend response includes Earth-fixed time series and frozen-at-request-time ellipse and apsides, with `derived` geometric and kinematic quantities and assumptions. All parameters validated by FastAPI, with defensive finite input validation in Python. Time remains within 30 days of epoch to avoid implicitly claiming high-fidelity future accuracy.
+
+**UI / interaction:** Four presets, six accessible continuous sliders, a schematic Earth-at-focus ellipse with evolving satellite marker, four backend-derived key readouts (perigee, apogee, period and current vis-viva speed), dynamic phase/altitude strip, 3D violet ellipse, glowing apsis markers, rotating-Earth trail, and timeline scrubbing independent of ISS data. When controls change, the stale preview is hidden during a debounced API re-computation. Previous ISS and Ground Control views remain accessible.
+
+**Verification:** Offline Kepler equation residual, vis-viva/specific-energy invariance, perigee/apogee extrema and velocity ordering, period law, phase and orientation effects, circular regression, invalid parameter rejection, and API contract checks. The Python-only mathematics tests can run without network access; the full suite and frontend bundle require dependency installation on the developer's machine.
+
+**Next potential milestone (only after local validation):** v0.5 Numerical Propagation Lab, comparing Kepler propagation with time-stepped integrators under the same UI, including error/step-size plots and consistency tests. No backend-only development.

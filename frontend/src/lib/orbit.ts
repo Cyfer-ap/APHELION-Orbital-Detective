@@ -63,19 +63,38 @@ export function surfaceCoordinates(point: { x: number; y: number; z: number }): 
   return {lat: Math.asin(point.y / r) * 180 / Math.PI, lon: Math.atan2(-point.z, point.x) * 180 / Math.PI};
 }
 
-/** Independent, idealized orbit model returned by /api/orbit/preview. */
-export type PreviewSample = { time: string; lat: number; lon: number; alt_km: number; speed_km_s: number };
+/** Keplerian mission designer; altitude_km is the PERIGEE altitude. */
+export type OrbitDesign = {
+  altitude_km: number;
+  inclination_deg: number;
+  eccentricity: number;
+  raan_deg: number;
+  argument_of_periapsis_deg: number;
+  phase_deg_at_epoch: number;
+};
+export type PreviewSample = {
+  time: string; lat: number; lon: number; alt_km: number; radius_km: number;
+  speed_km_s: number; true_anomaly_deg: number;
+};
 export type OrbitPreview = {
-  kind: 'hypothetical_circular_two_body'; name: string;
+  kind: 'hypothetical_elliptical_two_body'; name: string;
   epoch_utc: string;
-  parameters: { altitude_km: number; inclination_deg: number; eccentricity: number; raan_deg: number; phase_deg_at_epoch: number };
-  derived: { orbital_radius_km: number; semimajor_axis_km: number; period_minutes: number; speed_km_s: number; angular_rate_rad_s: number };
+  parameters: OrbitDesign;
+  derived: {
+    orbital_radius_km: number; semimajor_axis_km: number; period_minutes: number;
+    speed_km_s: number; angular_rate_rad_s: number;
+    perigee_altitude_km: number; apogee_altitude_km: number;
+    perigee_speed_km_s: number; apogee_speed_km_s: number;
+    specific_energy_km2_s2: number;
+  };
   state: PreviewSample;
+  apsides: { perigee: PreviewSample; apogee: PreviewSample };
   track: PreviewSample[]; plane_track: PreviewSample[]; assumptions: string[];
 };
 
-/** Interpolate display samples in UTC, unwrapping longitude across ±180 degrees.
- * Outside the sampled window return null: never freeze a virtual satellite. */
+/** Time-interpolated display samples, with wrapped longitudes and anomalies.
+ * Outside the backend coverage window, return null rather than freezing.
+ */
 export function interpolatePreview(track: PreviewSample[], ms: number): PreviewSample | null {
   if (!track.length || ms < Date.parse(track[0].time) || ms > Date.parse(track[track.length-1].time)) return null;
   let low = 0, high = track.length - 1;
@@ -86,9 +105,11 @@ export function interpolatePreview(track: PreviewSample[], ms: number): PreviewS
   const a = track[low], b = track[high];
   const span = Date.parse(b.time) - Date.parse(a.time);
   const t = span > 0 ? (ms - Date.parse(a.time)) / span : 0;
+  const anomaly = angle(a.true_anomaly_deg, b.true_anomaly_deg, t);
   return {
     time: new Date(ms).toISOString(),
     lat: lerp(a.lat,b.lat,t), lon: angle(a.lon+180,b.lon+180,t)-180,
-    alt_km: lerp(a.alt_km,b.alt_km,t), speed_km_s: lerp(a.speed_km_s,b.speed_km_s,t),
+    alt_km: lerp(a.alt_km,b.alt_km,t), radius_km: lerp(a.radius_km,b.radius_km,t),
+    speed_km_s: lerp(a.speed_km_s,b.speed_km_s,t), true_anomaly_deg: anomaly,
   };
 }

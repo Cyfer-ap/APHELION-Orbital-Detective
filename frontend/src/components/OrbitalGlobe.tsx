@@ -161,8 +161,8 @@ function OrbitPath({ track, station, current, mask }: { track: Sample[]; station
   </>;
 }
 
-/** A frozen-at-instant orbital-plane reference ring (solid violet) and rotating-Earth
- * ground path (faint dashed violet). Both geometries come from the Python engine. */
+/** A frozen-at-instant Keplerian ellipse (violet) and Earth-rotated time trail.
+ * Position, apsides and velocity all originate in the Python two-body engine. */
 function VirtualOrbit({ preview, getTime }: { preview: OrbitPreview; getTime: () => number }) {
   const marker = useRef<THREE.Group>(null);
   const glow = useRef<THREE.Mesh>(null);
@@ -174,6 +174,10 @@ function VirtualOrbit({ preview, getTime }: { preview: OrbitPreview; getTime: ()
     () => preview.track.map(p => new THREE.Vector3(...earthVector(p.lat, p.lon, 14))),
     [preview.track]
   );
+  const perigee = useMemo(() => earthVector(preview.apsides.perigee.lat,
+    preview.apsides.perigee.lon, preview.apsides.perigee.alt_km), [preview.apsides.perigee]);
+  const apogee = useMemo(() => earthVector(preview.apsides.apogee.lat,
+    preview.apsides.apogee.lon, preview.apsides.apogee.alt_km), [preview.apsides.apogee]);
   useFrame(({clock}) => {
     const state = interpolatePreview(preview.track, getTime());
     if(!marker.current)return;
@@ -186,11 +190,22 @@ function VirtualOrbit({ preview, getTime }: { preview: OrbitPreview; getTime: ()
     <Line points={orbitalPlane} color="#c49bff" transparent opacity={.88} lineWidth={2.5} raycast={() => null}/>
     <Line points={orbitalPlane} color="#885dff" transparent opacity={.13} lineWidth={10} raycast={() => null}/>
     <Line points={groundTrail} color="#a976e7" transparent opacity={.48} dashed dashSize={.05} gapSize={.04} lineWidth={1.4} raycast={() => null}/>
+    {/* Fixed-frame perigee and apogee annotations reveal how eccentricity and ω change geometry. */}
+    <group position={perigee}>
+      <mesh><sphereGeometry args={[.044, 16, 16]}/><meshBasicMaterial color="#f5b877"/></mesh>
+      <mesh><sphereGeometry args={[.085, 16, 16]}/><meshBasicMaterial color="#f5b877" transparent opacity={.15} depthWrite={false}/></mesh>
+      <Html center distanceFactor={9} position={[0, .13, 0]} className="apsis-label" occlude>PERIGEE · {Math.round(preview.derived.perigee_altitude_km).toLocaleString()} km</Html>
+    </group>
+    {preview.parameters.eccentricity > 0.001 && <group position={apogee}>
+      <mesh><sphereGeometry args={[.044, 16, 16]}/><meshBasicMaterial color="#f5b877"/></mesh>
+      <mesh><sphereGeometry args={[.085, 16, 16]}/><meshBasicMaterial color="#f5b877" transparent opacity={.15} depthWrite={false}/></mesh>
+      <Html center distanceFactor={9} position={[0, .13, 0]} className="apsis-label" occlude>APOGEE · {Math.round(preview.derived.apogee_altitude_km).toLocaleString()} km</Html>
+    </group>}
     <group ref={marker}>
       <mesh><sphereGeometry args={[.045, 20, 20]}/><meshBasicMaterial color="#f4dcff"/></mesh>
       <mesh ref={glow}><sphereGeometry args={[.104, 24, 24]}/><meshBasicMaterial color="#bc80ff" transparent opacity={.27} depthWrite={false}/></mesh>
       <pointLight color="#b577ff" intensity={.7} distance={1.2}/>
-      <Html position={[.18, .18, 0]} center distanceFactor={8} className="virtual-sat-label" occlude><b>APHELION-X</b><span>IDEAL 2-BODY</span></Html>
+      <Html position={[.18, .18, 0]} center distanceFactor={8} className="virtual-sat-label" occlude><b>APHELION-X</b><span>KEPLERIAN ELLIPSE</span></Html>
     </group>
   </group>;
 }
@@ -209,7 +224,7 @@ function Scene({ mission, preview, station, current, getTime, placing, onPlace, 
     {mission && <DynamicSat track={mission.track} getTime={getTime} />}
     {preview && <VirtualOrbit preview={preview} getTime={getTime} />}
     <OrbitControls enablePan={false} enableDamping dampingFactor={0.06}
-      minDistance={3.7} maxDistance={9} autoRotate={!placing} autoRotateSpeed={0.24} />
+      minDistance={3.7} maxDistance={13} autoRotate={!placing} autoRotateSpeed={0.24} />
   </>;
 }
 

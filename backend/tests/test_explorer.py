@@ -18,7 +18,7 @@ def test_circular_orbit_kepler_law_and_radius():
         2 * math.pi * math.sqrt(a**3 / MU_KM3_S2) / 60, abs=0.00006)
     assert result['derived']['speed_km_s'] == pytest.approx(math.sqrt(MU_KM3_S2 / a), abs=0.00001)
     assert len(result['track']) == 241
-    assert len(result['plane_track']) == 129
+    assert len(result['plane_track']) == 193
     assert all(math.isfinite(sample['lat']) and math.isfinite(sample['lon']) for sample in result['track'])
     assert all(sample['alt_km'] == 550 for sample in result['track'])
 
@@ -65,9 +65,28 @@ def test_api_preview_and_validation_without_iss():
     })
     assert response.status_code == 200
     data = response.json()
-    assert data['kind'] == 'hypothetical_circular_two_body'
+    assert data['kind'] == 'hypothetical_elliptical_two_body'
     assert data['parameters']['altitude_km'] == 680
     assert data['parameters']['inclination_deg'] == 98
     assert data['state']['alt_km'] == 680
     assert client.get('/api/orbit/preview', params={'inclination_deg': 181}).status_code == 422
     assert client.get('/api/orbit/preview', params={'at': '2026-10-18T00:00:00'}).status_code == 422
+
+
+def test_api_elliptical_design_and_invalid_elements():
+    response = client.get('/api/orbit/preview', params={
+        'at': EPOCH.isoformat(), 'epoch': EPOCH.isoformat(),
+        'altitude_km': 450, 'inclination_deg': 52,
+        'eccentricity': .24, 'raan_deg': 35,
+        'argument_of_periapsis_deg': 60, 'phase_deg_at_epoch': 0,
+    })
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data['parameters']['eccentricity'] == .24
+    assert data['parameters']['raan_deg'] == 35
+    assert data['derived']['apogee_altitude_km'] > 450
+    assert data['apsides']['perigee']['alt_km'] == pytest.approx(450)
+    assert data['state']['speed_km_s'] == pytest.approx(data['derived']['perigee_speed_km_s'])
+    assert client.get('/api/orbit/preview', params={'eccentricity': .36}).status_code == 422
+    assert client.get('/api/orbit/preview', params={'raan_deg': 361}).status_code == 422
+    assert client.get('/api/orbit/preview', params={'phase_deg_at_epoch': -1}).status_code == 422

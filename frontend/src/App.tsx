@@ -8,8 +8,8 @@ import {
 import Globe from './components/OrbitalGlobe';
 import GroundControl from './components/GroundControl';
 import OrbitExplorer from './components/OrbitExplorer';
-import { coord, interpolate, prettyTime, STATIONS } from './lib/orbit';
-import type { Mission, OrbitPreview, Sample, Station } from './lib/orbit';
+import { coord, interpolate, interpolatePreview, prettyTime, STATIONS } from './lib/orbit';
+import type { Mission, OrbitDesign, OrbitPreview, Sample, Station } from './lib/orbit';
 import './style.css';
 
 type ClockState={anchor:number; wall:number; speed:number};
@@ -68,8 +68,11 @@ export default function App(){
   const [loading,setLoading]=useState(true);
   const [error,setError]=useState<string|null>(null);
   const [pane,setPane]=useState<'orbit'|'passes'|'science'|'explore'>('orbit');
-  const [altitude,setAltitude]=useState(550);
-  const [inclination,setInclination]=useState(51.6);
+  const [design,setDesign]=useState<OrbitDesign>({
+    altitude_km: 450, inclination_deg: 51.6, eccentricity: 0.24,
+    raan_deg: 35, argument_of_periapsis_deg: 60, phase_deg_at_epoch: 0,
+  });
+  const changeDesign=(patch:Partial<OrbitDesign>)=>setDesign(previous=>({...previous,...patch}));
   const [preview,setPreview]=useState<OrbitPreview|null>(null);
   const [previewLoading,setPreviewLoading]=useState(false);
   const [previewError,setPreviewError]=useState<string|null>(null);
@@ -88,11 +91,11 @@ export default function App(){
   const current=useMemo(()=>mission&&synced?interpolate(mission.track,simulatedTime):null,[mission,synced,simulatedTime]);
   const isNearLive=Math.abs(simulatedTime-Date.now())<10000&&clock.speed===1;
   const isContact=!!current&&current.elevation_deg>=mask;
-  const previewSynced=!!preview&&preview.parameters.altitude_km===altitude
-    &&preview.parameters.inclination_deg===inclination;
+  const previewSynced=!!preview&&(Object.keys(design) as (keyof OrbitDesign)[]).every(k=>preview.parameters[k]===design[k]);
   const visiblePreview=pane==='explore'&&previewSynced ? preview : null;
+  const currentPreview=useMemo(()=>visiblePreview ? interpolatePreview(visiblePreview.track,simulatedTime) : null,[visiblePreview,simulatedTime]);
 
-  const fetchPreview=useCallback(async (at:number, h:number, inc:number)=>{
+  const fetchPreview=useCallback(async (at:number, options:OrbitDesign)=>{
     previewRequest.current?.abort();
     const controller=new AbortController();
     previewRequest.current=controller;
@@ -101,7 +104,10 @@ export default function App(){
     try {
       const params=new URLSearchParams({
         at:new Date(at).toISOString(),epoch:new Date(previewEpoch.current).toISOString(),
-        altitude_km:String(h),inclination_deg:String(inc)
+        altitude_km:String(options.altitude_km),inclination_deg:String(options.inclination_deg),
+        eccentricity:String(options.eccentricity),raan_deg:String(options.raan_deg),
+        argument_of_periapsis_deg:String(options.argument_of_periapsis_deg),
+        phase_deg_at_epoch:String(options.phase_deg_at_epoch)
       });
       const response=await fetch(`/api/orbit/preview?${params.toString()}`,{signal:controller.signal});
       if(!response.ok) {
@@ -119,11 +125,11 @@ export default function App(){
 
   useEffect(()=>{
     if(pane!=='explore')return;
-    const timer=window.setTimeout(()=>void fetchPreview(getTime(),altitude,inclination),230);
+    const timer=window.setTimeout(()=>void fetchPreview(getTime(),design),230);
     return ()=>window.clearTimeout(timer);
     // getTime changes each clock control; change in time alone is handled by interpolation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[pane,altitude,inclination,fetchPreview]);
+  },[pane,design,fetchPreview]);
   useEffect(()=>()=>previewRequest.current?.abort(),[]);
   useEffect(()=>{
     if(pane!=='explore')return;
@@ -131,10 +137,10 @@ export default function App(){
       if(!preview||previewLoading||!previewSynced)return;
       const start=Date.parse(preview.track[0].time),end=Date.parse(preview.track[preview.track.length-1].time);
       const now=getTime();
-      if(now<start+12*60000||now>end-12*60000)void fetchPreview(now,altitude,inclination);
+      if(now<start+12*60000||now>end-12*60000)void fetchPreview(now,design);
     },5000);
     return ()=>window.clearInterval(timer);
-  },[pane,preview,previewLoading,previewSynced,getTime,fetchPreview,altitude,inclination]);
+  },[pane,preview,previewLoading,previewSynced,getTime,fetchPreview,design]);
 
 
   const fetchMission=useCallback(async (when:number,s:Station,minimum:number)=>{
@@ -209,10 +215,11 @@ export default function App(){
       void fetchMission(target,station,mask);
     setPane('orbit');
   };
-  const trackStart=mission?Date.parse(mission.track[0].time):0;
-  const trackEnd=mission?Date.parse(mission.track[mission.track.length-1].time):0;
+  const timelineSamples=pane==='explore'?visiblePreview?.track:mission?.track;
+  const trackStart=timelineSamples?Date.parse(timelineSamples[0].time):0;
+  const trackEnd=timelineSamples?Date.parse(timelineSamples[timelineSamples.length-1].time):0;
   const sliderValue=Math.min(trackEnd,Math.max(trackStart,simulatedTime));
-  const progress=mission?Math.min(100,Math.max(0,(sliderValue-trackStart)/(trackEnd-trackStart)*100)):50;
+  const progress=timelineSamples?Math.min(100,Math.max(0,(sliderValue-trackStart)/(trackEnd-trackStart)*100)):50;
 
   return <div className="app-root">
     <div className="backdrop-grain" aria-hidden="true" />
@@ -224,14 +231,14 @@ export default function App(){
         <button aria-label="Science details" title="Science details" className={`rail-item ${pane==='science'?'active':''}`} onClick={()=>setPane('science')}><Activity size={20}/></button>
         <button aria-label="Virtual orbit explorer" title="Orbit explorer" className={`rail-item ${pane==='explore'?'active':''}`} onClick={()=>setPane('explore')}><Orbit size={20}/></button>
       </div>
-      <div className="rail-bottom"><div className="rail-separator"/><div className="rail-version">V 0.3</div></div>
+      <div className="rail-bottom"><div className="rail-separator"/><div className="rail-version">V 0.4</div></div>
     </aside>
 
     <div className="shell">
       <header className="topbar">
         <div className="brand"><span className="brand-name">APHELION<span className="brand-period">.</span></span><span className="brand-divider"/><span className="brand-sub">ORBITAL DETECTIVE</span></div>
         <div className="topbar-right">
-          <span className="environment-label">EXPERIMENT 003 <span className="small-dot">/</span> ORBIT EXPLORER</span>
+          <span className="environment-label">EXPERIMENT 004 <span className="small-dot">/</span> MISSION DESIGNER</span>
           <span className={`realtime-badge ${isNearLive?'is-live':''}`}><span className="realtime-pulse"/>{isNearLive?'REAL-TIME PREDICTION':'SIMULATION TIME'}</span>
           <span className="utc-time"><Clock3 size={13}/> {new Date(simulatedTime).toISOString().slice(11,19)} <small>UTC</small></span>
         </div>
@@ -240,9 +247,9 @@ export default function App(){
       <div className="dashboard">
         <main className="primary-stage">
           <div className="hero-heading">
-            <div className="hero-eyebrow"><span className="teal-line"/> EXPLORATION / 003 <span className="hero-eyebrow-muted">— ORBIT EXPLORER</span></div>
-            <h1>{pane==='explore'?'Shape the orbit':'Earth, in motion'}<span>.</span></h1>
-            <p>{pane==='explore'?'Real spacecraft. Hypothetical physics. One interactive Earth.':'Move your ground station. See the geometry respond.'}</p>
+            <div className="hero-eyebrow"><span className="teal-line"/> EXPLORATION / 004 <span className="hero-eyebrow-muted">— MISSION DESIGNER</span></div>
+            <h1>{pane==='explore'?'Design the impossible':'Earth, in motion'}<span>.</span></h1>
+            <p>{pane==='explore'?'Draw an ellipse through the sky. Science gives it motion.':'Move your ground station. See the geometry respond.'}</p>
           </div>
           <div className="stage-canvas">
             <Globe mission={mission} preview={visiblePreview} station={station} current={current} getTime={getTime} placing={placing}
@@ -250,11 +257,11 @@ export default function App(){
             {pane!=='explore'&&<GroundControl station={station} mask={mask} placing={placing} calculating={loading||!synced}
               footprintKm={current ? mission!.coverage.earth_radius_km * current.footprint_deg * Math.PI/180 : null}
               onTogglePlacing={()=>setPlacing(previous=>!previous)} onMaskChange={setMask}/>}
-            <button className={`stage-lab-toggle ${pane==='explore'?'active':''}`} onClick={()=>{setPane(pane==='explore'?'orbit':'explore');setPlacing(false);}} type="button"><Orbit size={16}/>{pane==='explore'?'EXIT ORBIT LAB':'OPEN ORBIT EXPLORER'} <span>↗</span></button>
-            {pane==='explore'&&<div className="stage-lab-legend"><span className="stage-lab-legend__virtual"/> APHELION-X · TWO-BODY <span className="stage-lab-legend__real"/> ISS · SGP4</div>}
+            <button className={`stage-lab-toggle ${pane==='explore'?'active':''}`} onClick={()=>{setPane(pane==='explore'?'orbit':'explore');setPlacing(false);}} type="button"><Orbit size={16}/>{pane==='explore'?'EXIT MISSION DESIGNER':'OPEN MISSION DESIGNER'} <span>↗</span></button>
+            {pane==='explore'&&<div className="stage-lab-legend"><span className="stage-lab-legend__virtual"/> APHELION-X · ELLIPTIC TWO-BODY <span className="stage-lab-legend__real"/> ISS · SGP4</div>}
             <div className="stage-overlay top-left"><span className="holo-label">{mission ? 'TARGET ACQUIRED' : 'ISS SIGNAL UNAVAILABLE'}</span><div className="holo-title"><Satellite size={15}/> ISS <span>/ ZARYA</span></div><span className="holo-secondary">NORAD 25544 <span className="holo-sep">·</span> LOW EARTH ORBIT</span></div>
             <div className="stage-overlay bottom-left"><div className="coordinate-title">SUBSATELLITE POINT</div><strong>{current?coord(current.lat,true):'— — —'} <span>/</span> {current?coord(current.lon,false):'— — —'}</strong><div className="coordinates-caption">Earth-fixed geographic coordinates</div></div>
-            <div className="stage-overlay bottom-right"><div className="hud-target"><Crosshair size={24} strokeWidth={1.1}/></div><span>{pane==='explore'?'KEPLER TWO-BODY / VIRTUAL':'SGP4 PROPAGATION / ISS'}<br/>REAL ELEMENTS REMAIN UNCHANGED</span></div>
+            <div className="stage-overlay bottom-right"><div className="hud-target"><Crosshair size={24} strokeWidth={1.1}/></div><span>{pane==='explore'?'ELLIPTIC TWO-BODY / VIRTUAL':'SGP4 PROPAGATION / ISS'}<br/>REAL ELEMENTS REMAIN UNCHANGED</span></div>
             {error && pane!=='explore' && <div className="error-overlay" role="alert"><Info size={24}/><strong>Orbital data unavailable</strong><p>{error}</p><p>Start the Python backend and ensure CelesTrak is reachable. We never fabricate telemetry.</p><button onClick={()=>void fetchMission(getTime(),station,mask)}><RefreshCw size={14}/> Retry connection</button></div>}
             {loading && !mission&&!error && pane!=='explore' && <div className="loading-overlay"><div className="loading-orbit"/><span>ACQUIRING ORBITAL ELEMENTS</span></div>}
           </div>
@@ -263,7 +270,7 @@ export default function App(){
             <div className="timeline-top"><span className="section-micro">TEMPORAL NAVIGATION</span><span className="timeline-time">{new Date(simulatedTime).toISOString().slice(0,10)} <b>{new Date(simulatedTime).toISOString().slice(11,19)}</b> UTC</span></div>
             <div className="timeline-controls">
               <div className="play-buttons"><button aria-label="Back ten minutes" title="Back ten minutes" onClick={()=>step(-600000)}><StepBack size={18}/></button><button className="play-pause" aria-label={clock.speed===0?'Play':'Pause'} onClick={()=>setSpeed(clock.speed===0?1:0)}>{clock.speed===0?<Play size={17} fill="currentColor"/>:<Pause size={17} fill="currentColor"/>}</button><button aria-label="Forward ten minutes" title="Forward ten minutes" onClick={()=>step(600000)}><StepForward size={18}/></button></div>
-              <div className="scrubber"><div className="scrubber-top"><span>{mission?prettyTime(mission.track[0].time):'—'}</span><span>TRAJECTORY WINDOW</span><span>{mission?prettyTime(mission.track[mission.track.length-1].time):'—'}</span></div><div className="scrubber-track"><div className="scrubber-progress" style={{width:`${progress}%`}}/><input aria-label="Orbital simulation time" type="range" min={trackStart} max={trackEnd} step="1000" value={sliderValue} disabled={!mission} onChange={e=>setClock({anchor:Number(e.target.value),wall:Date.now(),speed:0})}/></div></div>
+              <div className="scrubber"><div className="scrubber-top"><span>{timelineSamples?prettyTime(timelineSamples[0].time):'—'}</span><span>TRAJECTORY WINDOW</span><span>{timelineSamples?prettyTime(timelineSamples[timelineSamples.length-1].time):'—'}</span></div><div className="scrubber-track"><div className="scrubber-progress" style={{width:`${progress}%`}}/><input aria-label="Orbital simulation time" type="range" min={trackStart} max={trackEnd} step="1000" value={sliderValue} disabled={!timelineSamples} onChange={e=>setClock({anchor:Number(e.target.value),wall:Date.now(),speed:0})}/></div></div>
               <div className="speed-controls">{speeds.map(s=><button key={s} className={clock.speed===s?'active':''} onClick={()=>setSpeed(s)}>{s}×</button>)}<button className={`live-btn ${isNearLive?'live-active':''}`} onClick={returnToLive}><span/> NOW</button></div>
             </div>
           </section>
@@ -273,21 +280,19 @@ export default function App(){
           <div className="panel-top">
             <div className="panel-kicker"><span className="teal-dot"/> MISSION CONTROL <span className="panel-serial">001 / ISS</span></div>
             <div className="panel-sat-heading"><div><small>{pane==='explore'?'VIRTUAL ORBITAL LAB':'ACTIVE SPACECRAFT'}</small><h2>{pane==='explore'?<>APHELION <span>—</span> X</>:<>ISS <span>—</span> ZARYA</>}</h2></div><span className="sat-icon">{pane==='explore'?<Orbit size={23} strokeWidth={1.35}/>:<Satellite size={23} strokeWidth={1.35}/>}</span></div>
-            <div className="sat-id">{pane==='explore'?<><span className="mini-chip">IDEAL 2-BODY</span><span className="mini-chip">e = 0</span><span className="mini-chip amber">VIRTUAL</span></>:<><span className="mini-chip">NORAD 25544</span><span className="mini-chip">LEO</span><span className="mini-chip amber">PREDICTED</span></>}</div>
+            <div className="sat-id">{pane==='explore'?<><span className="mini-chip">IDEAL 2-BODY</span><span className="mini-chip">e = {design.eccentricity.toFixed(3)}</span><span className="mini-chip amber">VIRTUAL</span></>:<><span className="mini-chip">NORAD 25544</span><span className="mini-chip">LEO</span><span className="mini-chip amber">PREDICTED</span></>}</div>
           </div>
           <div className="panel-tabs" role="tablist" aria-label="Data panels">
             <button role="tab" aria-selected={pane==='orbit'} className={pane==='orbit'?'active':''} onClick={()=>setPane('orbit')}>TELEMETRY</button>
             <button role="tab" aria-selected={pane==='passes'} className={pane==='passes'?'active':''} onClick={()=>setPane('passes')}>PASSES</button>
             <button role="tab" aria-selected={pane==='science'} className={pane==='science'?'active':''} onClick={()=>setPane('science')}>SCIENCE</button>
-            <button role="tab" aria-selected={pane==='explore'} className={pane==='explore'?'active':''} onClick={()=>{setPane('explore');setPlacing(false);}}>EXPLORER</button>
+            <button role="tab" aria-selected={pane==='explore'} className={pane==='explore'?'active':''} onClick={()=>{setPane('explore');setPlacing(false);}}>DESIGNER</button>
           </div>
           <AnimatePresence mode="wait">
-            {pane==='explore'&&<OrbitExplorer key="explore" altitude={altitude} inclination={inclination}
-              onAltitude={setAltitude} onInclination={setInclination}
-              onPreset={(h,i)=>{setAltitude(h);setInclination(i);}}
-              preview={preview} loading={previewLoading||!previewSynced} error={previewError}
-              realAltitude={current?.alt_km??null} realPeriod={mission?.satellite.period_minutes??null}
-              onRetry={()=>void fetchPreview(getTime(),altitude,inclination)} />}
+            {pane==='explore'&&<OrbitExplorer key="explore" design={design} onChange={changeDesign} onPreset={setDesign}
+              preview={preview} currentPreview={currentPreview} loading={previewLoading||!previewSynced}
+              error={previewError} realAltitude={current?.alt_km??null}
+              onRetry={()=>void fetchPreview(getTime(),design)} />}
             {pane==='orbit'&&<motion.div key="orbit" className="panel-scroll" initial={{opacity:0,y:8}} animate={{opacity:1,y:0}} exit={{opacity:0,y:-6}} transition={{duration:.2}}>
               <div className="measurements-head"><span>ORBITAL TELEMETRY</span><span><span className="green-pip"/> ESTIMATED</span></div>
               <div className="telemetry-grid">
@@ -337,7 +342,7 @@ export default function App(){
           <div className="panel-end"><Waves size={15}/><span>APHELION SCIENCE ENGINE</span><span className="engine-ping"/></div>
         </aside>
       </div>
-      <footer className="bottom-bar"><span>APHELION / EXPERIMENT 003</span><span><span className="small-dot">●</span> REFERENCE FRAME: EARTH FIXED GEOCOORDINATES</span><span><Info size={13}/> EDUCATIONAL ORBITAL PREDICTIONS <span className="bottom-extra">— NOT FLIGHT TELEMETRY</span></span></footer>
+      <footer className="bottom-bar"><span>APHELION / EXPERIMENT 004</span><span><span className="small-dot">●</span> REFERENCE FRAME: EARTH FIXED GEOCOORDINATES</span><span><Info size={13}/> EDUCATIONAL ORBITAL PREDICTIONS <span className="bottom-extra">— NOT FLIGHT TELEMETRY</span></span></footer>
     </div>
   </div>;
 }
