@@ -2,8 +2,8 @@ import { Canvas, ThreeEvent, useFrame } from '@react-three/fiber';
 import { Html, Line, OrbitControls, Stars, useTexture } from '@react-three/drei';
 import { memo, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
-import type { Mission, OrbitPreview, Sample, Station } from '../lib/orbit';
-import { earthVector, interpolate, interpolatePreview, surfaceCoordinates } from '../lib/orbit';
+import type { LabComparison, Mission, OrbitPreview, Sample, Station } from '../lib/orbit';
+import { earthVector, interpolate, interpolateLab, interpolatePreview, surfaceCoordinates } from '../lib/orbit';
 
 type Coordinate = { lat: number; lon: number };
 
@@ -210,8 +210,63 @@ function VirtualOrbit({ preview, getTime }: { preview: OrbitPreview; getTime: ()
   </group>;
 }
 
-function Scene({ mission, preview, station, current, getTime, placing, onPlace, mask }: {
-  mission: Mission | null; preview: OrbitPreview | null; station: Station; current: Sample | null; getTime: () => number;
+
+/** Independent numerical and analytic trajectories in the SAME Earth-fixed frame.
+ * The animated separation is computed by the backend in inertial coordinates;
+ * line and markers here only depict their locations without exaggerating error. */
+function NumericalOrbit({ result, getTime }: { result: LabComparison; getTime: () => number }) {
+  const reference = useRef<THREE.Group>(null);
+  const numerical = useRef<THREE.Group>(null);
+  const errorLine = useRef<THREE.Group>(null);
+  const lineRef = useRef<THREE.BufferGeometry>(null);
+  const analyticPoints = useMemo(() => result.reference_track.map(s => new THREE.Vector3(...earthVector(s.lat,s.lon,s.alt_km))), [result.reference_track]);
+  const numericPoints = useMemo(() => result.numerical_track.map(s => new THREE.Vector3(...earthVector(s.lat,s.lon,s.alt_km))), [result.numerical_track]);
+  const errorPoints = useMemo(() => new Float32Array(6), []);
+  useFrame(() => {
+    const when = getTime();
+    const a = interpolateLab(result.reference_track,when);
+    const b = interpolateLab(result.numerical_track,when);
+    const visible = !!a && !!b;
+    if (reference.current) reference.current.visible = visible;
+    if (numerical.current) numerical.current.visible = visible;
+    if (errorLine.current) errorLine.current.visible = visible;
+    if(!a||!b)return;
+    const av=earthVector(a.lat,a.lon,a.alt_km);
+    const bv=earthVector(b.lat,b.lon,b.alt_km);
+    reference.current?.position.set(...av);
+    numerical.current?.position.set(...bv);
+    if(lineRef.current){
+      errorPoints.set([...av,...bv]);
+      const attr=lineRef.current.getAttribute('position') as THREE.BufferAttribute;
+      attr.needsUpdate=true;
+      lineRef.current.computeBoundingSphere();
+    }
+  });
+  return <group raycast={() => null}>
+    <Line points={analyticPoints} color="#c39cff" lineWidth={2.3} opacity={.9} transparent raycast={() => null}/>
+    <Line points={numericPoints} color="#f2aa70" lineWidth={2} opacity={.83} transparent dashed dashSize={.035} gapSize={.024} raycast={() => null}/>
+    <group ref={errorLine}>
+      <line raycast={() => null}>
+        <bufferGeometry ref={lineRef}><bufferAttribute attach="attributes-position" args={[errorPoints,3]}/></bufferGeometry>
+        <lineBasicMaterial color="#f7ddb9" transparent opacity={.8} depthTest={false}/>
+      </line>
+    </group>
+    <group ref={reference}>
+      <mesh><sphereGeometry args={[.045,18,18]}/><meshBasicMaterial color="#dfc7ff"/></mesh>
+      <mesh><sphereGeometry args={[.083,16,16]}/><meshBasicMaterial color="#b47eff" transparent opacity={.17} depthWrite={false}/></mesh>
+      <Html distanceFactor={9} center position={[0,.15,0]} className="virtual-sat-label" occlude><b>REFERENCE</b><span>ANALYTIC KEPLER</span></Html>
+    </group>
+    <group ref={numerical}>
+      <mesh><sphereGeometry args={[.047,18,18]}/><meshBasicMaterial color="#ffd3a2"/></mesh>
+      <mesh><sphereGeometry args={[.105,18,18]}/><meshBasicMaterial color="#f8ad71" transparent opacity={.23} depthWrite={false}/></mesh>
+      <pointLight color="#f0a16d" intensity={.65} distance={1.3}/>
+      <Html distanceFactor={9} center position={[0,-.16,0]} className="numerical-marker-label" occlude><b>NUMERICAL</b><span>{result.model.method.toUpperCase()}</span></Html>
+    </group>
+  </group>;
+}
+
+function Scene({ mission, preview, comparison, station, current, getTime, placing, onPlace, mask }: {
+  mission: Mission | null; preview: OrbitPreview | null; comparison: LabComparison | null; station: Station; current: Sample | null; getTime: () => number;
   placing: boolean; onPlace: (coordinates: Coordinate) => void; mask: number;
 }) {
   return <>
@@ -223,20 +278,21 @@ function Scene({ mission, preview, station, current, getTime, placing, onPlace, 
     {mission && <OrbitPath track={mission.track} station={station} current={current} mask={mask} />}
     {mission && <DynamicSat track={mission.track} getTime={getTime} />}
     {preview && <VirtualOrbit preview={preview} getTime={getTime} />}
+    {comparison && <NumericalOrbit result={comparison} getTime={getTime} />}
     <OrbitControls enablePan={false} enableDamping dampingFactor={0.06}
       minDistance={3.7} maxDistance={13} autoRotate={!placing} autoRotateSpeed={0.24} />
   </>;
 }
 
-function Globe({ mission, preview, station, current, getTime, placing, onPlace, mask }: {
-  mission: Mission | null; preview: OrbitPreview | null; station: Station; current: Sample | null; getTime: () => number;
+function Globe({ mission, preview, comparison, station, current, getTime, placing, onPlace, mask }: {
+  mission: Mission | null; preview: OrbitPreview | null; comparison: LabComparison | null; station: Station; current: Sample | null; getTime: () => number;
   placing: boolean; onPlace: (coordinate: Coordinate) => void; mask: number;
 }) {
   return <div className={`globe-container ${placing ? 'globe-is-placing' : ''}`}>
     <div className="globe-glow" aria-hidden="true" />
     <div className="globe-crosshairs" aria-hidden="true"><span /><span /></div>
-    {mission || preview ? <Canvas camera={{ position: [2.7, 1.5, 4.7], fov: 44 }} gl={{ antialias: true, alpha: true }} dpr={[1, 1.8]}>
-      <Scene mission={mission} preview={preview} station={station} current={current} getTime={getTime} placing={placing} onPlace={onPlace} mask={mask} />
+    {mission || preview || comparison ? <Canvas camera={{ position: [2.7, 1.5, 4.7], fov: 44 }} gl={{ antialias: true, alpha: true }} dpr={[1, 1.8]}>
+      <Scene mission={mission} preview={preview} comparison={comparison} station={station} current={current} getTime={getTime} placing={placing} onPlace={onPlace} mask={mask} />
     </Canvas> : <div className="globe-placeholder"><span className="placeholder-orb" /></div>}
     <div className="globe-hint">{placing ? 'CLICK THE PLANET TO POSITION GS—01' : 'DRAG TO ROTATE'} <span>·</span> SCROLL TO ZOOM</div>
   </div>;

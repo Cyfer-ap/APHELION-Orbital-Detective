@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .orbits import build_mission, safe_satellite
 from .explorer import build_preview
 
-app = FastAPI(title="Orbital Detective API", version="0.4.0")
+app = FastAPI(title="Orbital Detective API", version="0.5.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -17,7 +17,7 @@ app.add_middleware(
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "version": "0.4.0", "mode": "predicted_orbit_not_live_telemetry"}
+    return {"status": "ok", "version": "0.5.0", "mode": "predicted_orbit_not_live_telemetry"}
 
 
 @app.get("/api/mission")
@@ -62,3 +62,26 @@ def preview_orbit(
                              phase_deg_at_epoch)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get('/api/orbit/compare')
+def compare_orbit(
+    epoch: datetime | None = None,
+    altitude_km: float = Query(450, ge=200, le=2000),
+    inclination_deg: float = Query(51.6, ge=0, le=180),
+    eccentricity: float = Query(0.24, ge=0, le=0.35),
+    raan_deg: float = Query(35, ge=0, le=360),
+    argument_of_periapsis_deg: float = Query(60, ge=0, le=360),
+    phase_deg_at_epoch: float = Query(0, ge=0, le=360),
+    method: str = Query('rk4', pattern='^(rk4|verlet|euler)$'),
+    step_seconds: float = Query(120, ge=10, le=360),
+    duration_orbits: int = Query(2, ge=1, le=3),
+):
+    """Propagate a virtual orbit numerically and compare against Kepler's exact solution."""
+    from .numerical import compare_propagators
+    try:
+        return compare_propagators(epoch or datetime.now(timezone.utc), altitude_km, inclination_deg,
+                                   eccentricity, raan_deg, argument_of_periapsis_deg,
+                                   phase_deg_at_epoch,method,step_seconds,duration_orbits)
+    except ValueError as exc:
+        raise HTTPException(status_code=422,detail=str(exc)) from exc

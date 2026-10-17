@@ -1,6 +1,6 @@
 # APHELION — Vision, Scientific Architecture & Development Plan
 
-**Status:** v0.4 Mission Designer implemented; local runtime / browser verification remains the next checkpoint  
+**Status:** v0.5 Numerical Lab implemented; local full frontend build / browser interaction verification is the next checkpoint  
 **Project identity:** Orbital Detective / APHELION  
 **Type:** Personal, interactive scientific playground, not a production satellite operations tool
 
@@ -77,7 +77,7 @@ A feature is **not complete** after only step 2. The preferred unit of progress 
 | **0.2 · Ground Control** | Arbitrary station coordinates, configurable elevation mask, visibility windows | **Click/drag station** on globe; animated horizon/visibility cone; real-time pass/geometry updates; fine mask slider | Moving a station or changing mask updates the full view consistently |
 | **0.3 · Orbit Explorer** (implemented) | Circular two-body inclination, semimajor axis/altitude, speed and period; validated state and epoch; Earth-fixed track | Altitude/inclination presets and sliders; animated violet spacecraft, tilted frozen-instant orbital plane and Earth-fixed ground trail; ISS comparison | Slider interaction triggers computation, visuals and numerical readouts together |
 | **0.4 · Mission Designer** (implemented) | Elliptical two-body propagation with eccentricity, i, Ω, ω, initial true anomaly, apsis distance and vis-viva speed | APHELION-X shape/plane/phase sliders, eccentricity diagram, illuminated apsis markers and speed readout | Compute state in Python, animate on 3D Earth and display synchronized results in the same slice |
-| **0.5 · Orbital Laboratory** | Numerical two-body integrator; compare with analytic baseline; diagnostic invariants | Split/overlay trajectory comparisons; interactive error plots and time controls | Explanatory comparison plots agree with controlled reference cases |
+| **0.5 · Numerical Lab** (implemented) | Independently evolve the same Cartesian ECI initial state with Euler, velocity Verlet or RK4; analytic Kepler baseline; 3D ECI position error and invariants | Adjustable 10–360 s max integration substep; 1–3 period horizon; animated 3D analytic/numerical overlays, logarithmic interactive error plot, metric cards and time scrubbing | Analytic and numerical tracks start together; method and timestep visibly affect measured numerical error |
 | **0.6 · Orbital Detective** | Compare time-separated element sets and propagated positions; compute deviations | Visual "investigation" missions with orbit overlays and discrepancy timeline | User can inspect prediction differences without mistaking them for proven maneuvers |
 
 These are **proposals**, not a promise to implement every item. Each slice is reviewed after local validation; exploration remains more important than feature quantity. Later optional experiments may include Sun/Earth illumination geometry, ground-station optimization, satellite constellations, and educational conjunction geometry (never safety-critical collision warnings).
@@ -196,3 +196,18 @@ The Python endpoint `GET /api/orbit/preview` validates both parameters and timez
 **Verification:** Offline Kepler equation residual, vis-viva/specific-energy invariance, perigee/apogee extrema and velocity ordering, period law, phase and orientation effects, circular regression, invalid parameter rejection, and API contract checks. The Python-only mathematics tests can run without network access; the full suite and frontend bundle require dependency installation on the developer's machine.
 
 **Next potential milestone (only after local validation):** v0.5 Numerical Propagation Lab, comparing Kepler propagation with time-stepped integrators under the same UI, including error/step-size plots and consistency tests. No backend-only development.
+
+
+## 12. v0.5 Numerical Laboratory — precise contract
+
+**Question.** How do three time-stepping algorithms deviate from an exact analytical two-body reference when initial conditions, epoch, and force model agree?
+
+**Backend.** `backend/app/numerical.py` implements the Cartesian ECI initial condition from the same Keplerian elements used in v0.4. Evolve `d r/dt = v`, `d v/dt = -μ r / |r|³` using forward Euler, velocity Verlet, or RK4. The analytic comparator uses Kepler's equation independently at each sampled time. Relative energy drift is `100 abs((ε(t)−ε₀)/ε₀)`, with `ε = |v|²/2−μ/|r|`. Relative angular momentum drift is `100 abs((|r×v|(t)−h₀)/h₀)`. Position error is `||r_numerical−r_analytic||₂` in inertial kilometers *before* converting to geographic coordinates, rounding, or display interpolation. The output grid contains 13–181 aligned samples over 1–3 orbital periods; large requested steps use a sparser grid to prevent silently capping the effective step at the visualization spacing. All computations use the same gravitational parameter and spherical reference-Earth radius as the Mission Designer.
+
+**Important subtlety.** The slider controls **maximum integration substep size** (10–360 s). Integration substeps shrink at output boundaries so both trajectories have exactly corresponding timestamps. Thus velocity Verlet here is second-order kick–drift–kick but **not** a rigorously fixed-step symplectic map across output steps. Do not describe it as preserving symplecticity without qualification. The entire experiment is ideal unperturbed Kepler motion: no J₂, drag, thrust, uncertainty, or collision safety model.
+
+**API.** `GET /api/orbit/compare`, query parameters: `epoch` (UTC/offset-aware), virtual orbit elements matching `/api/orbit/preview`, `method` in `{euler,verlet,rk4}`, `step_seconds` 10–360, `duration_orbits` 1–3. Response includes `reference_track`, `numerical_track` and 13–181 aligned diagnostics, final/maximum position errors and maximum conservation-law drifts. The request is independent of ISS data, although the full FastAPI application still needs the declared backend packages installed.
+
+**Frontend.** `LAB` tab and quick launch beside the 3D globe. Violet = analytic Kepler reference; amber = selected numerical integrator. Both marker positions and sampled trajectories come from the Python backend. The chart uses a logarithmic y-axis to allow Euler and RK4 experiments; click a chart position to scrub the synchronized globe. Experiment controls update the API, summary statistics, labels, and 3D path together. Editing the elements in DESIGNER changes the initial conditions of the next laboratory comparison. Old comparison results are hidden while parameters change. Browser animation uses interpolation for visual continuity only, never as an integrator.
+
+**Verification.** Python mathematical tests cover shared initial state, conservation-law reference values, Euler/Verlet/RK4 error ordering, improvement with smaller RK4 substeps, generic orbital orientation, input validation, and API contract. Re-run complete installed `pytest` and `npm run build` on the developer machine; a visual/manual WebGL check must validate rendering and chart/time synchrony before proceeding to v0.6.

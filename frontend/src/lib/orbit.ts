@@ -113,3 +113,24 @@ export function interpolatePreview(track: PreviewSample[], ms: number): PreviewS
     speed_km_s: lerp(a.speed_km_s,b.speed_km_s,t), true_anomaly_deg: anomaly,
   };
 }
+
+export type Integrator = 'rk4'|'verlet'|'euler';
+export type LaboratoryConfig = { method:Integrator; step_seconds:number; duration_orbits:number };
+export type LabSample = {time:string;lat:number;lon:number;alt_km:number;speed_km_s:number};
+export type LabDiagnostic = {elapsed_minutes:number;position_error_km:number;relative_energy_drift_pct:number;relative_angular_momentum_drift_pct:number};
+export type LabComparison = {
+  kind:'two_body_numerical_comparison';epoch_utc:string;parameters:OrbitDesign;
+  model:LaboratoryConfig & {period_minutes:number;max_substep_seconds:number;integration_substeps:number};
+  reference_track:LabSample[];numerical_track:LabSample[];diagnostics:LabDiagnostic[];
+  summary:{final_error_km:number;max_error_km:number;max_energy_drift_pct:number;max_angular_momentum_drift_pct:number};
+  assumptions:string[];
+};
+export function interpolateLab(track:LabSample[],ms:number):LabSample|null{
+  if(!track.length||ms<Date.parse(track[0].time)||ms>Date.parse(track[track.length-1].time))return null;
+  let l=0,r=track.length-1;
+  while(r-l>1){const m=(l+r)>>1;if(Date.parse(track[m].time)<=ms)l=m;else r=m;}
+  const a=track[l],b=track[r];const width=Date.parse(b.time)-Date.parse(a.time);
+  const t=width>0?(ms-Date.parse(a.time))/width:0;
+  return {time:new Date(ms).toISOString(),lat:lerp(a.lat,b.lat,t),lon:angle(a.lon+180,b.lon+180,t)-180,
+    alt_km:lerp(a.alt_km,b.alt_km,t),speed_km_s:lerp(a.speed_km_s,b.speed_km_s,t)};
+}

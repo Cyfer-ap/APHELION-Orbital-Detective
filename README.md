@@ -4,8 +4,9 @@
 
 > **Project rule:** Every new scientific/backend capability ships in the same vertical slice as its polished, interactive UI. We will not build the entire backend first and add a frontend later.
 
-## What exists in v0.4
+## What exists in v0.5
 
+- **Numerical Lab v0.5:** Compare Python-computed analytic Kepler states with three independent numerical integrators (**forward Euler**, **velocity Verlet**, **RK4**) for the *same virtual satellite and initial ECI state*. Adjust maximum substep (10–360 seconds) and propagation horizon (1–3 orbits), and inspect animated 3D path overlays, numerical separation markers, energy-drift metrics, and a clickable logarithmic position-error graph. The laboratory works independently of ISS data.
 - **Mission Designer v0.4:** Design a virtual **elliptical** satellite trajectory by changing perigee altitude (200–2000 km), eccentricity (0–0.35), inclination (0–180°), right ascension of ascending node Ω (0–360°), argument of periapsis ω (0–360°), and initial true anomaly ν₀ (0–360°). The Python backend solves Kepler's equation and computes vis-viva speed, apogee/perigee, period, and Earth-fixed trajectories.
 - **Integrated UI:** Violet 3D ellipse, illuminated perigee/apogee markers, moving satellite, synchronized telemetry, eccentricity-sensitive orbit schematic, four presets and time scrubbing even if ISS data is unavailable.
 - **Previous v0.3 circular Orbit Explorer** remains a preset (set eccentricity to zero). Earlier ISS and ground-control visualizations are preserved.
@@ -97,7 +98,9 @@ Open **http://localhost:5173** in your browser. Keep both terminal processes run
 7. Open **Mission Designer** to see a virtual elliptical orbit. Choose ELLIPTICAL, move the eccentricity slider, and inspect the violet ellipse and perigee/apogee markers.
 8. Change Ω and ω; watch the orientation and apsides rotate. Set ν₀ to change the starting spacecraft position. Scrub time to watch speed and altitude vary between perigee and apogee.
 9. Select **CIRCULAR** and verify that perigee and apogee coincide and the speed becomes constant.
-10. Open **Science** to inspect ISS propagation, orbital-element epoch, cache provenance, and footprint assumptions.
+10. Open **LAB** or **OPEN NUMERICAL LAB**. Try Euler at 240–360 seconds and 3 orbits, then select RK4: the amber trajectory should track the purple analytic orbit far more closely, and the error curve should drop. Reduce the step toward 10 seconds and watch errors decrease. Click the logarithmic error chart to scrub to that instant.
+11. Change the starting orbit in **DESIGNER**, then return to **LAB** to compare the same modified orbit.
+12. Open **Science** to inspect ISS propagation, orbital-element epoch, cache provenance, and footprint assumptions.
 
 ## Tests and validation
 
@@ -115,7 +118,7 @@ cd frontend
 npm run build
 ```
 
-**Current verification:** The v0.4 orbital numerical checks run without external data. Full integration (`pytest`, React production build, and browser testing) should be verified locally after installing dependencies. If something fails, report the console output and we will fix it before expanding scope.
+**Current verification:** v0.5 numerical-integration tests, including method ordering and RK4 step convergence, run without Skyfield or network access. Other existing scientific tests may need the full installed dependencies. Full integration (`pytest`, React production build, and browser testing) should be verified locally after installing dependencies. If something fails, report the console output and we will fix it before expanding scope.
 
 ## Project structure
 
@@ -153,7 +156,7 @@ npm run build
 
 ## Scope discipline
 
-This is a personal scientific playground, **not a SaaS**. No authentication, payment features, accounts, or production infrastructure unless they become essential to a specific experiment. v0.4 extends the circular orbit experiment into a configurable **elliptical Mission Designer**. The next potential slice is numerical propagation and error visualization, after local verification.
+This is a personal scientific playground, **not a SaaS**. No authentication, payment features, accounts, or production infrastructure unless they become essential to a specific experiment. v0.5 compares that **elliptical Mission Designer** with three numerical integrators and synchronized animations. The next potential experiment is investigating prediction divergence from distinct element epochs, after local verification.
 
 ## Scientific limitations
 
@@ -207,3 +210,20 @@ python -m pytest -q tests/test_mission_designer.py
 ```
 
 Run the complete backend suite after installing `backend/requirements.txt`.
+
+
+## Numerical Lab v0.5 — equations, limits, and endpoint
+
+The independent *analytic reference* solves Kepler’s equation for the same eccentricity and epoch used by the numerical calculation. The numerical state is a Cartesian 6-vector `y=(r,v)` integrated forward under
+
+`dr/dt = v`, `dv/dt = -μ r / |r|³`, `μ=398600.4418 km³/s²`.
+
+Available methods are first-order **forward Euler**, second-order **velocity Verlet** (kick–drift–kick), and fourth-order **RK4**. Both tracks start with identical ECI positions and velocities generated from the Mission Designer elements `(a, e, i, Ω, ω, ν₀)`. The error at each sample is `||r_numeric−r_analytic||₂` *in km* in the same inertial frame. Energy drift uses `ε=|v|²/2−μ/|r|` and angular-momentum drift uses `h=|r×v|`, both expressed as absolute percent changes from the initial value. The error plot is logarithmic to distinguish very small RK4 errors from Euler-scale drift.
+
+**Step-size semantics:** The selected step is a *maximum*. A shorter integration substep may be needed to align with the output-sampling timeline. The output grid contains 13–181 samples and becomes intentionally sparser at coarse timesteps, so settings of 240s and 360s have measurably different effects. Therefore the Verlet implementation is not strictly fixed-step symplectic. Earth-fixed visualization uses the same approximate UTC/GMST rotation as the Mission Designer; measurement errors are calculated before this display conversion.
+
+**Endpoint:** `GET /api/orbit/compare?epoch=2026-10-18T00:00:00Z&method=rk4&step_seconds=120&duration_orbits=2&altitude_km=450&inclination_deg=51.6&eccentricity=0.24&raan_deg=35&argument_of_periapsis_deg=60&phase_deg_at_epoch=0`
+
+**Tests:** From `backend/`, run `python -m pytest -q tests/test_numerical.py` to verify the engine, invariants, method ranking, convergence, and invalid parameter rejection. The API-contract test requires the installed backend dependencies. Run `npm run build` inside `frontend/` to verify frontend typing/bundling.
+
+The lab is ideal two-body mechanics—not SGP4, a perturbation model, operational orbit determination, or real satellite tracking. No collision safety conclusions should be drawn from it.
