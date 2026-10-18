@@ -2,7 +2,7 @@ import { Canvas, ThreeEvent, useFrame } from '@react-three/fiber';
 import { Html, Line, OrbitControls, Stars, useTexture } from '@react-three/drei';
 import { memo, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
-import type { ForensicComparison, HistoryComparison, LabComparison, Mission, OrbitPreview, Sample, Station } from '../lib/orbit';
+import type { ForensicComparison, HistoryComparison, J2Comparison, LabComparison, Mission, OrbitPreview, Sample, Station } from '../lib/orbit';
 import { earthVector, interpolate, interpolateLab, interpolatePreview, surfaceCoordinates } from '../lib/orbit';
 
 type Coordinate = { lat: number; lon: number };
@@ -214,20 +214,22 @@ function VirtualOrbit({ preview, getTime }: { preview: OrbitPreview; getTime: ()
 /** Independent numerical and analytic trajectories in the SAME Earth-fixed frame.
  * The animated separation is computed by the backend in inertial coordinates;
  * line and markers here only depict their locations without exaggerating error. */
-function NumericalOrbit({ result, getTime }: { result: LabComparison | ForensicComparison | HistoryComparison; getTime: () => number }) {
+function NumericalOrbit({ result, getTime }: { result: LabComparison | ForensicComparison | HistoryComparison | J2Comparison; getTime: () => number }) {
   const forensic = result.kind === 'sgp4_vs_two_body_epoch_comparison';
   const archive = result.kind === 'sgp4_historical_snapshot_comparison';
+  const j2 = result.kind === 'j2_vs_two_body';
+  const alternateTrack = j2 ? result.j2_track : result.numerical_track;
   const reference = useRef<THREE.Group>(null);
   const numerical = useRef<THREE.Group>(null);
   const errorLine = useRef<THREE.Group>(null);
   const lineRef = useRef<THREE.BufferGeometry>(null);
   const analyticPoints = useMemo(() => result.reference_track.map(s => new THREE.Vector3(...earthVector(s.lat,s.lon,s.alt_km))), [result.reference_track]);
-  const numericPoints = useMemo(() => result.numerical_track.map(s => new THREE.Vector3(...earthVector(s.lat,s.lon,s.alt_km))), [result.numerical_track]);
+  const numericPoints = useMemo(() => alternateTrack.map(s => new THREE.Vector3(...earthVector(s.lat,s.lon,s.alt_km))), [alternateTrack]);
   const errorPoints = useMemo(() => new Float32Array(6), []);
   useFrame(() => {
     const when = getTime();
     const a = interpolateLab(result.reference_track,when);
-    const b = interpolateLab(result.numerical_track,when);
+    const b = interpolateLab(alternateTrack,when);
     const visible = !!a && !!b;
     if (reference.current) reference.current.visible = visible;
     if (numerical.current) numerical.current.visible = visible;
@@ -256,19 +258,19 @@ function NumericalOrbit({ result, getTime }: { result: LabComparison | ForensicC
     <group ref={reference}>
       <mesh><sphereGeometry args={[.045,18,18]}/><meshBasicMaterial color="#dfc7ff"/></mesh>
       <mesh><sphereGeometry args={[.083,16,16]}/><meshBasicMaterial color="#b47eff" transparent opacity={.17} depthWrite={false}/></mesh>
-      <Html distanceFactor={9} center position={[0,.15,0]} className="virtual-sat-label" occlude><b>{archive?'TLE / A':forensic?'SGP4 · ISS':'REFERENCE'}</b><span>{archive?'SGP4 · SNAPSHOT A':forensic?'PUBLISHED ELEMENTS':'ANALYTIC KEPLER'}</span></Html>
+      <Html distanceFactor={9} center position={[0,.15,0]} className="virtual-sat-label" occlude><b>{j2?'POINT MASS':archive?'TLE / A':forensic?'SGP4 · ISS':'REFERENCE'}</b><span>{j2?'CENTRAL GRAVITY':archive?'SGP4 · SNAPSHOT A':forensic?'PUBLISHED ELEMENTS':'ANALYTIC KEPLER'}</span></Html>
     </group>
     <group ref={numerical}>
       <mesh><sphereGeometry args={[.047,18,18]}/><meshBasicMaterial color="#ffd3a2"/></mesh>
       <mesh><sphereGeometry args={[.105,18,18]}/><meshBasicMaterial color="#f8ad71" transparent opacity={.23} depthWrite={false}/></mesh>
       <pointLight color="#f0a16d" intensity={.65} distance={1.3}/>
-      <Html distanceFactor={9} center position={[0,-.16,0]} className="numerical-marker-label" occlude><b>{archive?'TLE / B':forensic?'TWO BODY':'NUMERICAL'}</b><span>{archive?'SGP4 · SNAPSHOT B':forensic?'RK4 · SAME EPOCH':result.kind === 'two_body_numerical_comparison'?result.model.method.toUpperCase():''}</span></Html>
+      <Html distanceFactor={9} center position={[0,-.16,0]} className="numerical-marker-label" occlude><b>{j2?'EARTH · J₂':archive?'TLE / B':forensic?'TWO BODY':'NUMERICAL'}</b><span>{j2?'OBLATE EARTH':archive?'SGP4 · SNAPSHOT B':forensic?'RK4 · SAME EPOCH':result.kind === 'two_body_numerical_comparison'?result.model.method.toUpperCase():''}</span></Html>
     </group>
   </group>;
 }
 
-function Scene({ mission, preview, comparison, forensics, history, station, current, getTime, placing, onPlace, mask }: {
-  mission: Mission | null; preview: OrbitPreview | null; comparison: LabComparison | null; forensics: ForensicComparison | null; history: HistoryComparison | null; station: Station; current: Sample | null; getTime: () => number;
+function Scene({ mission, preview, comparison, forensics, history, perturbation, station, current, getTime, placing, onPlace, mask }: {
+  mission: Mission | null; preview: OrbitPreview | null; comparison: LabComparison | null; forensics: ForensicComparison | null; history: HistoryComparison | null; perturbation: J2Comparison | null; station: Station; current: Sample | null; getTime: () => number;
   placing: boolean; onPlace: (coordinates: Coordinate) => void; mask: number;
 }) {
   return <>
@@ -283,20 +285,21 @@ function Scene({ mission, preview, comparison, forensics, history, station, curr
     {comparison && <NumericalOrbit result={comparison} getTime={getTime} />}
     {forensics && <NumericalOrbit result={forensics} getTime={getTime} />}
     {history && <NumericalOrbit result={history} getTime={getTime} />}
+    {perturbation && <NumericalOrbit result={perturbation} getTime={getTime} />}
     <OrbitControls enablePan={false} enableDamping dampingFactor={0.06}
       minDistance={3.7} maxDistance={13} autoRotate={!placing} autoRotateSpeed={0.24} />
   </>;
 }
 
-function Globe({ mission, preview, comparison, forensics, history, station, current, getTime, placing, onPlace, mask }: {
-  mission: Mission | null; preview: OrbitPreview | null; comparison: LabComparison | null; forensics: ForensicComparison | null; history: HistoryComparison | null; station: Station; current: Sample | null; getTime: () => number;
+function Globe({ mission, preview, comparison, forensics, history, perturbation, station, current, getTime, placing, onPlace, mask }: {
+  mission: Mission | null; preview: OrbitPreview | null; comparison: LabComparison | null; forensics: ForensicComparison | null; history: HistoryComparison | null; perturbation: J2Comparison | null; station: Station; current: Sample | null; getTime: () => number;
   placing: boolean; onPlace: (coordinate: Coordinate) => void; mask: number;
 }) {
   return <div className={`globe-container ${placing ? 'globe-is-placing' : ''}`}>
     <div className="globe-glow" aria-hidden="true" />
     <div className="globe-crosshairs" aria-hidden="true"><span /><span /></div>
-    {mission || preview || comparison || forensics || history ? <Canvas camera={{ position: [2.7, 1.5, 4.7], fov: 44 }} gl={{ antialias: true, alpha: true }} dpr={[1, 1.8]}>
-      <Scene mission={mission} preview={preview} comparison={comparison} forensics={forensics} history={history} station={station} current={current} getTime={getTime} placing={placing} onPlace={onPlace} mask={mask} />
+    {mission || preview || comparison || forensics || history || perturbation ? <Canvas camera={{ position: [2.7, 1.5, 4.7], fov: 44 }} gl={{ antialias: true, alpha: true }} dpr={[1, 1.8]}>
+      <Scene mission={mission} preview={preview} comparison={comparison} forensics={forensics} history={history} perturbation={perturbation} station={station} current={current} getTime={getTime} placing={placing} onPlace={onPlace} mask={mask} />
     </Canvas> : <div className="globe-placeholder"><span className="placeholder-orb" /></div>}
     <div className="globe-hint">{placing ? 'CLICK THE PLANET TO POSITION GS—01' : 'DRAG TO ROTATE'} <span>·</span> SCROLL TO ZOOM</div>
   </div>;

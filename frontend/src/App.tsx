@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import {
   Activity, ArrowDownRight, ArrowUpRight, ChevronDown, CircleDot, Clock3,
   Crosshair, Globe2, Info, LocateFixed, Pause, Play, Radio,
-  RefreshCw, Satellite, ShieldCheck, Signal, StepBack, StepForward, Waves, Orbit, FlaskConical, ScanSearch, Archive,
+  RefreshCw, Satellite, ShieldCheck, Signal, StepBack, StepForward, Waves, Orbit, FlaskConical, ScanSearch, Archive, Atom,
 } from 'lucide-react';
 import Globe from './components/OrbitalGlobe';
 import GroundControl from './components/GroundControl';
@@ -11,8 +11,9 @@ import OrbitExplorer from './components/OrbitExplorer';
 import NumericalLab from './components/NumericalLab';
 import OrbitForensics from './components/OrbitForensics';
 import HistoryLab from './components/HistoryLab';
+import PerturbationLab from './components/PerturbationLab';
 import { coord, interpolate, interpolateLab, interpolatePreview, prettyTime, STATIONS } from './lib/orbit';
-import type { ForensicComparison, HistoryComparison, HistorySnapshot, LabComparison, LaboratoryConfig, Mission, OrbitDesign, OrbitPreview, Sample, Station } from './lib/orbit';
+import type { ForensicComparison, HistoryComparison, HistorySnapshot, J2Comparison, LabComparison, LaboratoryConfig, Mission, OrbitDesign, OrbitPreview, Sample, Station } from './lib/orbit';
 import './style.css';
 
 type ClockState={anchor:number; wall:number; speed:number};
@@ -70,7 +71,7 @@ export default function App(){
   const [mission,setMission]=useState<Mission|null>(null);
   const [loading,setLoading]=useState(true);
   const [error,setError]=useState<string|null>(null);
-  const [pane,setPane]=useState<'orbit'|'passes'|'science'|'explore'|'lab'|'forensics'|'history'>('orbit');
+  const [pane,setPane]=useState<'orbit'|'passes'|'science'|'explore'|'lab'|'forensics'|'history'|'j2'>('orbit');
   const [design,setDesign]=useState<OrbitDesign>({
     altitude_km: 450, inclination_deg: 51.6, eccentricity: 0.24,
     raan_deg: 35, argument_of_periapsis_deg: 60, phase_deg_at_epoch: 0,
@@ -101,6 +102,12 @@ export default function App(){
   const [historyError,setHistoryError]=useState<string|null>(null);
   const historyRequest=useRef<AbortController|null>(null);
 
+  const [j2Days,setJ2Days]=useState(3);
+  const [j2Data,setJ2Data]=useState<J2Comparison|null>(null);
+  const [j2Loading,setJ2Loading]=useState(false);
+  const [j2Error,setJ2Error]=useState<string|null>(null);
+  const j2Request=useRef<AbortController|null>(null);
+
   const [clock,setClock]=useState<ClockState>({anchor:Date.now(),wall:Date.now(),speed:1});
   const [tick,setTick]=useState(Date.now());
 
@@ -118,13 +125,40 @@ export default function App(){
   const labSynced=!!comparison&&(Object.keys(design) as (keyof OrbitDesign)[]).every(k=>comparison.parameters[k]===design[k])&&
     (Object.keys(labConfig) as (keyof LaboratoryConfig)[]).every(k=>comparison.model[k]===labConfig[k]);
   const visibleLab=pane==='lab'&&labSynced?comparison:null;
+  const j2Synced=!!j2Data && j2Data.model.horizon_days===j2Days &&
+    (Object.keys(design) as (keyof OrbitDesign)[]).every(k=>j2Data.parameters[k]===design[k]);
+  const visibleJ2=pane==='j2'&&j2Synced?j2Data:null;
   const visibleHistory=pane==='history' && history?.reference.id===referenceId && history.candidate.id===candidateId
     && history.model.horizon_hours===historyHorizon ? history : null;
   const visibleForensics=pane==='forensics'&&forensics?.model.horizon_hours===forensicHorizon?forensics:null;
   const forensicCurrent=useMemo(()=>visibleForensics?interpolateLab(visibleForensics.reference_track,simulatedTime):null,[visibleForensics,simulatedTime]);
   const historyCurrent=useMemo(()=>visibleHistory?interpolateLab(visibleHistory.reference_track,simulatedTime):null,[visibleHistory,simulatedTime]);
   const labCurrent=useMemo(()=>visibleLab?interpolateLab(visibleLab.reference_track,simulatedTime):null,[visibleLab,simulatedTime]);
+  const j2Current=useMemo(()=>visibleJ2?interpolateLab(visibleJ2.reference_track,simulatedTime):null,[visibleJ2,simulatedTime]);
   const currentPreview=useMemo(()=>visiblePreview ? interpolatePreview(visiblePreview.track,simulatedTime) : null,[visiblePreview,simulatedTime]);
+
+  const fetchJ2=useCallback(async(shape:OrbitDesign,horizon:number)=>{
+    j2Request.current?.abort();
+    const controller=new AbortController();j2Request.current=controller;
+    setJ2Error(null);setJ2Loading(true);
+    try {
+      const params=new URLSearchParams({epoch:new Date(previewEpoch.current).toISOString(),
+        altitude_km:String(shape.altitude_km),inclination_deg:String(shape.inclination_deg),
+        eccentricity:String(shape.eccentricity),raan_deg:String(shape.raan_deg),
+        argument_of_periapsis_deg:String(shape.argument_of_periapsis_deg),
+        phase_deg_at_epoch:String(shape.phase_deg_at_epoch),horizon_days:String(horizon)});
+      const response=await fetch(`/api/orbit/perturbations?${params}`,{signal:controller.signal});
+      if(!response.ok){const details=await response.json().catch(()=>({}));
+        throw new Error(typeof details.detail==='string'?details.detail:`Perturbation error ${response.status}`);}
+      const result:J2Comparison=await response.json();
+      if(!controller.signal.aborted){setJ2Data(result);setClock({anchor:Date.parse(result.window_start_utc),wall:Date.now(),speed:30});}
+    }catch(e){if(!controller.signal.aborted)setJ2Error(e instanceof Error?e.message:String(e));}
+    finally{if(j2Request.current===controller){j2Request.current=null;setJ2Loading(false);}}
+  },[]);
+  useEffect(()=>{if(pane!=='j2')return;
+    const t=window.setTimeout(()=>void fetchJ2(design,j2Days),260);return ()=>window.clearTimeout(t);
+  },[pane,design,j2Days,fetchJ2]);
+  useEffect(()=>()=>j2Request.current?.abort(),[]);
 
   const fetchPreview=useCallback(async (at:number, options:OrbitDesign)=>{
     previewRequest.current?.abort();
@@ -303,9 +337,9 @@ export default function App(){
   // Historical playback should never strand normal ISS tracking in an old epoch.
   const previousPane=useRef(pane);
   useEffect(()=>{
-    const wasArchive=previousPane.current==='history';
+    const wasArchive=previousPane.current==='history'||previousPane.current==='j2';
     previousPane.current=pane;
-    if(wasArchive && !['history','forensics','lab'].includes(pane)){
+    if(wasArchive && !['history','forensics','lab','j2'].includes(pane)){
       const now=Date.now();
       setClock({anchor:now,wall:now,speed:1});
       void fetchMission(now,station,mask);
@@ -326,6 +360,7 @@ export default function App(){
     return ()=>window.clearInterval(timer);
   },[mission,loading,fetchMission,getTime,station,mask,isNearLive]);
 
+  const openJ2=()=>{setPlacing(false);setPane('j2');};
   const openHistory=()=>{setPlacing(false);setPane('history');};
   const openForensics=()=>{setPlacing(false);setPane('forensics');};
   const openLab=()=>{
@@ -347,9 +382,10 @@ export default function App(){
   const step=(deltaMs:number)=>{
     const target=getTime()+deltaMs;
     setClock({anchor:target,wall:Date.now(),speed:0});
-    if (mission&&(target<Date.parse(mission.track[0].time)+5*60000||target>Date.parse(mission.track[mission.track.length-1].time)-5*60000)) void fetchMission(target,station,mask);
+    if (pane!=='j2'&&mission&&(target<Date.parse(mission.track[0].time)+5*60000||target>Date.parse(mission.track[mission.track.length-1].time)-5*60000)) void fetchMission(target,station,mask);
   };
   const returnToLive=()=>{
+    if(pane==='j2'&&visibleJ2){setClock({anchor:Date.parse(visibleJ2.window_start_utc),wall:Date.now(),speed:30});return;}
     const target=Date.now();
     setClock({anchor:target,wall:target,speed:1});
     void fetchMission(target,station,mask);
@@ -371,7 +407,12 @@ export default function App(){
     const end=Date.parse(visibleHistory.reference_track.at(-1)!.time);
     if(simulatedTime>end)setClock({anchor:Date.parse(visibleHistory.epoch_utc),wall:Date.now(),speed:clock.speed});
   },[pane,visibleHistory,clock.speed,simulatedTime]);
-  const timelineSamples=pane==='history'?visibleHistory?.reference_track:pane==='forensics'?visibleForensics?.reference_track:pane==='lab'?visibleLab?.reference_track:pane==='explore'?visiblePreview?.track:mission?.track;
+  useEffect(()=>{
+    if(pane!=='j2'||!visibleJ2||clock.speed<=0)return;
+    if(simulatedTime>Date.parse(visibleJ2.window_end_utc))
+      setClock({anchor:Date.parse(visibleJ2.window_start_utc),wall:Date.now(),speed:clock.speed});
+  },[pane,visibleJ2,clock.speed,simulatedTime]);
+  const timelineSamples=pane==='j2'?visibleJ2?.reference_track:pane==='history'?visibleHistory?.reference_track:pane==='forensics'?visibleForensics?.reference_track:pane==='lab'?visibleLab?.reference_track:pane==='explore'?visiblePreview?.track:mission?.track;
   const trackStart=timelineSamples?Date.parse(timelineSamples[0].time):0;
   const trackEnd=timelineSamples?Date.parse(timelineSamples[timelineSamples.length-1].time):0;
   const sliderValue=Math.min(trackEnd,Math.max(trackStart,simulatedTime));
@@ -389,15 +430,16 @@ export default function App(){
         <button aria-label="Numerical laboratory" title="Numerical laboratory" className={`rail-item ${pane==='lab'?'active':''}`} onClick={openLab}><FlaskConical size={20}/></button>
         <button aria-label="Orbit forensics" title="Orbit forensics" className={`rail-item ${pane==='forensics'?'active':''}`} onClick={openForensics}><ScanSearch size={20}/></button>
         <button aria-label="Historical element archive" title="Historical element archive" className={`rail-item ${pane==='history'?'active':''}`} onClick={openHistory}><Archive size={20}/></button>
+        <button aria-label="J2 perturbation laboratory" title="J2 perturbation laboratory" className={`rail-item ${pane==='j2'?'active':''}`} onClick={openJ2}><Atom size={20}/></button>
       </div>
-      <div className="rail-bottom"><div className="rail-separator"/><div className="rail-version">V 0.7</div></div>
+      <div className="rail-bottom"><div className="rail-separator"/><div className="rail-version">V 0.8</div></div>
     </aside>
 
     <div className="shell">
       <header className="topbar">
         <div className="brand"><span className="brand-name">APHELION<span className="brand-period">.</span></span><span className="brand-divider"/><span className="brand-sub">ORBITAL DETECTIVE</span></div>
         <div className="topbar-right">
-          <span className="environment-label">EXPERIMENT 007 <span className="small-dot">/</span> EPOCH ARCHIVE</span>
+          <span className="environment-label">EXPERIMENT 008 <span className="small-dot">/</span> J₂ PERTURBATIONS</span>
           <span className={`realtime-badge ${isNearLive?'is-live':''}`}><span className="realtime-pulse"/>{isNearLive?'REAL-TIME PREDICTION':'SIMULATION TIME'}</span>
           <span className="utc-time"><Clock3 size={13}/> {new Date(simulatedTime).toISOString().slice(11,19)} <small>UTC</small></span>
         </div>
@@ -406,28 +448,29 @@ export default function App(){
       <div className="dashboard">
         <main className="primary-stage">
           <div className="hero-heading">
-            <div className="hero-eyebrow"><span className="teal-line"/> EXPLORATION / 006 <span className="hero-eyebrow-muted">— ORBIT FORENSICS</span></div>
-            <h1>{pane==='history'?'History in motion':pane==='forensics'?'Investigate the orbit':pane==='lab'?'Chasing precision':pane==='explore'?'Design the impossible':'Earth, in motion'}<span>.</span></h1>
-            <p>{pane==='history'?'Two element epochs. One propagator. Compare the predictions.':pane==='forensics'?'Two models. One epoch. What changes with time?':pane==='lab'?'Compare an exact orbit against three numerical methods.':pane==='explore'?'Draw an ellipse through the sky. Science gives it motion.':'Move your ground station. See the geometry respond.'}</p>
+            <div className="hero-eyebrow"><span className="teal-line"/> EXPLORATION / 008 <span className="hero-eyebrow-muted">— J₂ PERTURBATIONS</span></div>
+            <h1>{pane==='j2'?'Earth is not a sphere':pane==='history'?'History in motion':pane==='forensics'?'Investigate the orbit':pane==='lab'?'Chasing precision':pane==='explore'?'Design the impossible':'Earth, in motion'}<span>.</span></h1>
+            <p>{pane==='j2'?'An oblate Earth twists orbital planes. Change inclination to watch.':pane==='history'?'Two element epochs. One propagator. Compare the predictions.':pane==='forensics'?'Two models. One epoch. What changes with time?':pane==='lab'?'Compare an exact orbit against three numerical methods.':pane==='explore'?'Draw an ellipse through the sky. Science gives it motion.':'Move your ground station. See the geometry respond.'}</p>
           </div>
           <div className="stage-canvas">
-            <Globe mission={pane==='lab'||pane==='forensics'||pane==='history'?null:mission} preview={visiblePreview} comparison={visibleLab} forensics={visibleForensics} history={visibleHistory} station={station} current={current} getTime={getTime} placing={placing}
+            <Globe mission={pane==='lab'||pane==='forensics'||pane==='history'||pane==='j2'?null:mission} preview={visiblePreview} comparison={visibleLab} forensics={visibleForensics} history={visibleHistory} perturbation={visibleJ2} station={station} current={current} getTime={getTime} placing={placing}
               onPlace={handlePlace} mask={mask}/>
-            {pane!=='explore'&&pane!=='lab'&&pane!=='forensics'&&pane!=='history'&&<GroundControl station={station} mask={mask} placing={placing} calculating={loading||!synced}
+            {pane!=='explore'&&pane!=='lab'&&pane!=='forensics'&&pane!=='history'&&pane!=='j2'&&<GroundControl station={station} mask={mask} placing={placing} calculating={loading||!synced}
               footprintKm={current ? mission!.coverage.earth_radius_km * current.footprint_deg * Math.PI/180 : null}
               onTogglePlacing={()=>setPlacing(previous=>!previous)} onMaskChange={setMask}/>}
             <button className={`stage-lab-toggle ${pane==='explore'?'active':''}`} onClick={()=>{setPane(pane==='explore'?'orbit':'explore');setPlacing(false);}} type="button"><Orbit size={16}/>{pane==='explore'?'EXIT MISSION DESIGNER':'OPEN MISSION DESIGNER'} <span>↗</span></button>
             <button className={`stage-lab-toggle stage-num-toggle ${pane==='lab'?'active':''}`} onClick={pane==='lab'?()=>setPane('explore'):openLab} type="button"><FlaskConical size={16}/>{pane==='lab'?'EXIT NUMERICAL LAB':'OPEN NUMERICAL LAB'} <span>↗</span></button>
+            {pane==='j2'&&<div className="stage-lab-legend forensic-stage-legend"><span className="stage-lab-legend__virtual"/> POINT MASS · RK4 <span className="stage-lab-legend__real num-legend"/> OBLATE EARTH · J₂</div>}
             {pane==='history'&&<div className="stage-lab-legend forensic-stage-legend"><span className="stage-lab-legend__virtual"/> TLE SNAPSHOT A / SGP4 <span className="stage-lab-legend__real num-legend"/> TLE SNAPSHOT B / SGP4</div>}
             {pane==='forensics'&&<div className="stage-lab-legend forensic-stage-legend"><span className="stage-lab-legend__virtual"/> SGP4 · CelesTrak ELEMENTS <span className="stage-lab-legend__real num-legend"/> TWO-BODY · RK4</div>}
             {pane==='lab'&&<div className="stage-lab-legend"><span className="stage-lab-legend__virtual"/> ANALYTIC REFERENCE <span className="stage-lab-legend__real num-legend"/> NUMERICAL {labConfig.method.toUpperCase()}</div>}
             <button className={`stage-lab-toggle forensic-stage-toggle ${pane==='forensics'?'active':''}`} onClick={pane==='forensics'?()=>setPane('orbit'):openForensics} type="button"><ScanSearch size={16}/>{pane==='forensics'?'EXIT ORBIT FORENSICS':'OPEN ORBIT FORENSICS'} <span>↗</span></button>
             {pane==='explore'&&<div className="stage-lab-legend"><span className="stage-lab-legend__virtual"/> APHELION-X · ELLIPTIC TWO-BODY <span className="stage-lab-legend__real"/> ISS · SGP4</div>}
-            <div className="stage-overlay top-left"><span className="holo-label">{pane==='history'?'HISTORICAL ELEMENT STUDY':pane==='forensics'?'MODEL COMPARISON':pane==='lab'?'VIRTUAL EXPERIMENT':mission?'TARGET ACQUIRED':'ISS SIGNAL UNAVAILABLE'}</span><div className="holo-title">{pane==='history'?<><Archive size={15}/> ISS <span>/ EPOCH ARCHIVE</span></>:pane==='forensics'?<><ScanSearch size={15}/> ISS <span>/ ORBIT FORENSICS</span></>:pane==='lab'?<><FlaskConical size={15}/> TWO-BODY <span>/ LABORATORY</span></>:<><Satellite size={15}/> ISS <span>/ ZARYA</span></>}</div><span className="holo-secondary">{pane==='history'?'TWO RECORDED EPOCHS · SHARED SGP4':pane==='forensics'?'SAME GCRS EPOCH STATE · DISTINCT MODELS':pane==='lab'?'ANALYTIC VS. NUMERICAL · SAME INITIAL STATE':<>NORAD 25544 <span className="holo-sep">·</span> LOW EARTH ORBIT</>}</span></div>
-            <div className="stage-overlay bottom-left"><div className="coordinate-title">{pane==='history'?'REFERENCE SUBSATELLITE POINT':pane==='forensics'?'SGP4 SUBSATELLITE POINT':pane==='lab'?'REFERENCE SUBSATELLITE POINT':'SUBSATELLITE POINT'}</div><strong>{pane==='history'?(historyCurrent?coord(historyCurrent.lat,true):'— — —'):pane==='forensics'?(forensicCurrent?coord(forensicCurrent.lat,true):'— — —'):pane==='lab'?(labCurrent?coord(labCurrent.lat,true):'— — —'):(current?coord(current.lat,true):'— — —')} <span>/</span> {pane==='history'?(historyCurrent?coord(historyCurrent.lon,false):'— — —'):pane==='forensics'?(forensicCurrent?coord(forensicCurrent.lon,false):'— — —'):pane==='lab'?(labCurrent?coord(labCurrent.lon,false):'— — —'):(current?coord(current.lon,false):'— — —')}</strong><div className="coordinates-caption">Earth-fixed geographic coordinates</div></div>
-            <div className="stage-overlay bottom-right"><div className="hud-target"><Crosshair size={24} strokeWidth={1.1}/></div><span>{pane==='history'?'GCRS SNAPSHOT DIVERGENCE / ISS':pane==='forensics'?'GCRS MODEL DISCREPANCY / ISS':pane==='lab'?'TWO-BODY INTEGRATION / ECI':pane==='explore'?'ELLIPTIC TWO-BODY / VIRTUAL':'SGP4 PROPAGATION / ISS'}<br/>REAL ELEMENTS REMAIN UNCHANGED</span></div>
-            {error && pane!=='explore' && pane!=='lab' && pane!=='forensics' && <div className="error-overlay" role="alert"><Info size={24}/><strong>Orbital data unavailable</strong><p>{error}</p><p>Start the Python backend and ensure CelesTrak is reachable. We never fabricate telemetry.</p><button onClick={()=>void fetchMission(getTime(),station,mask)}><RefreshCw size={14}/> Retry connection</button></div>}
-            {loading && !mission&&!error && pane!=='explore' && pane!=='lab' && pane!=='forensics' && <div className="loading-overlay"><div className="loading-orbit"/><span>ACQUIRING ORBITAL ELEMENTS</span></div>}
+            <div className="stage-overlay top-left"><span className="holo-label">{pane==='j2'?'J₂ PERTURBATION STUDY':pane==='history'?'HISTORICAL ELEMENT STUDY':pane==='forensics'?'MODEL COMPARISON':pane==='lab'?'VIRTUAL EXPERIMENT':mission?'TARGET ACQUIRED':'ISS SIGNAL UNAVAILABLE'}</span><div className="holo-title">{pane==='j2'?<><Atom size={15}/> J₂ <span>/ NODAL PRECESSION</span></>:pane==='history'?<><Archive size={15}/> ISS <span>/ EPOCH ARCHIVE</span></>:pane==='forensics'?<><ScanSearch size={15}/> ISS <span>/ ORBIT FORENSICS</span></>:pane==='lab'?<><FlaskConical size={15}/> TWO-BODY <span>/ LABORATORY</span></>:<><Satellite size={15}/> ISS <span>/ ZARYA</span></>}</div><span className="holo-secondary">{pane==='j2'?'SAME INITIAL ECI STATE · DISTINCT GRAVITY':pane==='history'?'TWO RECORDED EPOCHS · SHARED SGP4':pane==='forensics'?'SAME GCRS EPOCH STATE · DISTINCT MODELS':pane==='lab'?'ANALYTIC VS. NUMERICAL · SAME INITIAL STATE':<>NORAD 25544 <span className="holo-sep">·</span> LOW EARTH ORBIT</>}</span></div>
+            <div className="stage-overlay bottom-left"><div className="coordinate-title">{pane==='j2'?'POINT-MASS REFERENCE POSITION':pane==='history'?'REFERENCE SUBSATELLITE POINT':pane==='forensics'?'SGP4 SUBSATELLITE POINT':pane==='lab'?'REFERENCE SUBSATELLITE POINT':'SUBSATELLITE POINT'}</div><strong>{pane==='j2'?(j2Current?coord(j2Current.lat,true):'— — —'):pane==='history'?(historyCurrent?coord(historyCurrent.lat,true):'— — —'):pane==='forensics'?(forensicCurrent?coord(forensicCurrent.lat,true):'— — —'):pane==='lab'?(labCurrent?coord(labCurrent.lat,true):'— — —'):(current?coord(current.lat,true):'— — —')} <span>/</span> {pane==='j2'?(j2Current?coord(j2Current.lon,false):'— — —'):pane==='history'?(historyCurrent?coord(historyCurrent.lon,false):'— — —'):pane==='forensics'?(forensicCurrent?coord(forensicCurrent.lon,false):'— — —'):pane==='lab'?(labCurrent?coord(labCurrent.lon,false):'— — —'):(current?coord(current.lon,false):'— — —')}</strong><div className="coordinates-caption">Earth-fixed geographic coordinates</div></div>
+            <div className="stage-overlay bottom-right"><div className="hud-target"><Crosshair size={24} strokeWidth={1.1}/></div><span>{pane==='j2'?'J₂ VS CENTRAL GRAVITY / ECI':pane==='history'?'GCRS SNAPSHOT DIVERGENCE / ISS':pane==='forensics'?'GCRS MODEL DISCREPANCY / ISS':pane==='lab'?'TWO-BODY INTEGRATION / ECI':pane==='explore'?'ELLIPTIC TWO-BODY / VIRTUAL':'SGP4 PROPAGATION / ISS'}<br/>REAL ELEMENTS REMAIN UNCHANGED</span></div>
+            {error && pane!=='explore' && pane!=='lab' && pane!=='forensics' && pane!=='history' && pane!=='j2' && <div className="error-overlay" role="alert"><Info size={24}/><strong>Orbital data unavailable</strong><p>{error}</p><p>Start the Python backend and ensure CelesTrak is reachable. We never fabricate telemetry.</p><button onClick={()=>void fetchMission(getTime(),station,mask)}><RefreshCw size={14}/> Retry connection</button></div>}
+            {loading && !mission&&!error && pane!=='explore' && pane!=='lab' && pane!=='forensics' && pane!=='history' && pane!=='j2' && <div className="loading-overlay"><div className="loading-orbit"/><span>ACQUIRING ORBITAL ELEMENTS</span></div>}
           </div>
 
           <section className="timeline" aria-label="Simulation controls">
@@ -435,16 +478,16 @@ export default function App(){
             <div className="timeline-controls">
               <div className="play-buttons"><button aria-label="Back ten minutes" title="Back ten minutes" onClick={()=>step(-600000)}><StepBack size={18}/></button><button className="play-pause" aria-label={clock.speed===0?'Play':'Pause'} onClick={()=>setSpeed(clock.speed===0?1:0)}>{clock.speed===0?<Play size={17} fill="currentColor"/>:<Pause size={17} fill="currentColor"/>}</button><button aria-label="Forward ten minutes" title="Forward ten minutes" onClick={()=>step(600000)}><StepForward size={18}/></button></div>
               <div className="scrubber"><div className="scrubber-top"><span>{timelineSamples?prettyTime(timelineSamples[0].time):'—'}</span><span>TRAJECTORY WINDOW</span><span>{timelineSamples?prettyTime(timelineSamples[timelineSamples.length-1].time):'—'}</span></div><div className="scrubber-track"><div className="scrubber-progress" style={{width:`${progress}%`}}/><input aria-label="Orbital simulation time" type="range" min={trackStart} max={trackEnd} step="1000" value={sliderValue} disabled={!timelineSamples} onChange={e=>setClock({anchor:Number(e.target.value),wall:Date.now(),speed:0})}/></div></div>
-              <div className="speed-controls">{speeds.map(s=><button key={s} className={clock.speed===s?'active':''} onClick={()=>setSpeed(s)}>{s}×</button>)}<button className={`live-btn ${isNearLive?'live-active':''}`} onClick={returnToLive}><span/> NOW</button></div>
+              <div className="speed-controls">{speeds.map(s=><button key={s} className={clock.speed===s?'active':''} onClick={()=>setSpeed(s)}>{s}×</button>)}<button className={`live-btn ${isNearLive?'live-active':''}`} onClick={returnToLive}><span/> {pane==='j2'?'START':'NOW'}</button></div>
             </div>
           </section>
         </main>
 
         <aside className="data-panel" aria-label="Orbital measurements">
           <div className="panel-top">
-            <div className="panel-kicker"><span className="teal-dot"/> MISSION CONTROL <span className="panel-serial">{pane==='history'?'007 / HISTORY':pane==='forensics'?'006 / FORENSICS':pane==='lab'?'005 / LAB':'001 / ISS'}</span></div>
-            <div className="panel-sat-heading"><div><small>{pane==='history'?'TWO SNAPSHOTS / SGP4':pane==='forensics'?'SGP4 / TWO-BODY':pane==='lab'?'NUMERICAL EXPERIMENT':pane==='explore'?'VIRTUAL ORBITAL LAB':'ACTIVE SPACECRAFT'}</small><h2>{pane==='history'?<>EPOCH <span>—</span> ARCHIVE</>:pane==='forensics'?<>ORBIT <span>—</span> FORENSICS</>:pane==='lab'?<>INTEGRATION <span>—</span> LAB</>:pane==='explore'?<>APHELION <span>—</span> X</>:<>ISS <span>—</span> ZARYA</>}</h2></div><span className="sat-icon">{pane==='history'?<Archive size={23} strokeWidth={1.35}/>:pane==='forensics'?<ScanSearch size={23} strokeWidth={1.35}/>:pane==='lab'?<FlaskConical size={23} strokeWidth={1.35}/>:pane==='explore'?<Orbit size={23} strokeWidth={1.35}/>:<Satellite size={23} strokeWidth={1.35}/>}</span></div>
-            <div className="sat-id">{pane==='history'?<><span className="mini-chip">TWO REAL EPOCHS</span><span className="mini-chip amber">SGP4 / SGP4</span></>:pane==='forensics'?<><span className="mini-chip">REAL ELEMENTS</span><span className="mini-chip amber">MODEL COMPARISON</span></>:pane==='lab'?<><span className="mini-chip">NUMERICAL / ANALYTIC</span><span className="mini-chip amber">ECI</span></>:pane==='explore'?<><span className="mini-chip">IDEAL 2-BODY</span><span className="mini-chip">e = {design.eccentricity.toFixed(3)}</span><span className="mini-chip amber">VIRTUAL</span></>:<><span className="mini-chip">NORAD 25544</span><span className="mini-chip">LEO</span><span className="mini-chip amber">PREDICTED</span></>}</div>
+            <div className="panel-kicker"><span className="teal-dot"/> MISSION CONTROL <span className="panel-serial">{pane==='j2'?'008 / J₂':pane==='history'?'007 / HISTORY':pane==='forensics'?'006 / FORENSICS':pane==='lab'?'005 / LAB':'001 / ISS'}</span></div>
+            <div className="panel-sat-heading"><div><small>{pane==='j2'?'J₂ / TWO-BODY':pane==='history'?'TWO SNAPSHOTS / SGP4':pane==='forensics'?'SGP4 / TWO-BODY':pane==='lab'?'NUMERICAL EXPERIMENT':pane==='explore'?'VIRTUAL ORBITAL LAB':'ACTIVE SPACECRAFT'}</small><h2>{pane==='j2'?<>J₂ <span>—</span> LAB</>:pane==='history'?<>EPOCH <span>—</span> ARCHIVE</>:pane==='forensics'?<>ORBIT <span>—</span> FORENSICS</>:pane==='lab'?<>INTEGRATION <span>—</span> LAB</>:pane==='explore'?<>APHELION <span>—</span> X</>:<>ISS <span>—</span> ZARYA</>}</h2></div><span className="sat-icon">{pane==='j2'?<Atom size={23} strokeWidth={1.35}/>:pane==='history'?<Archive size={23} strokeWidth={1.35}/>:pane==='forensics'?<ScanSearch size={23} strokeWidth={1.35}/>:pane==='lab'?<FlaskConical size={23} strokeWidth={1.35}/>:pane==='explore'?<Orbit size={23} strokeWidth={1.35}/>:<Satellite size={23} strokeWidth={1.35}/>}</span></div>
+            <div className="sat-id">{pane==='j2'?<><span className="mini-chip">EARTH OBLATENESS</span><span className="mini-chip amber">RK4 · ECI</span></>:pane==='history'?<><span className="mini-chip">TWO REAL EPOCHS</span><span className="mini-chip amber">SGP4 / SGP4</span></>:pane==='forensics'?<><span className="mini-chip">REAL ELEMENTS</span><span className="mini-chip amber">MODEL COMPARISON</span></>:pane==='lab'?<><span className="mini-chip">NUMERICAL / ANALYTIC</span><span className="mini-chip amber">ECI</span></>:pane==='explore'?<><span className="mini-chip">IDEAL 2-BODY</span><span className="mini-chip">e = {design.eccentricity.toFixed(3)}</span><span className="mini-chip amber">VIRTUAL</span></>:<><span className="mini-chip">NORAD 25544</span><span className="mini-chip">LEO</span><span className="mini-chip amber">PREDICTED</span></>}</div>
           </div>
           <div className="panel-tabs" role="tablist" aria-label="Data panels">
             <button role="tab" aria-selected={pane==='orbit'} className={pane==='orbit'?'active':''} onClick={()=>setPane('orbit')}>TELEMETRY</button>
@@ -453,9 +496,14 @@ export default function App(){
             <button role="tab" aria-selected={pane==='explore'} className={pane==='explore'?'active':''} onClick={()=>{setPane('explore');setPlacing(false);}}>DESIGNER</button>
             <button role="tab" aria-selected={pane==='lab'} className={pane==='lab'?'active':''} onClick={openLab}>LAB</button>
             <button role="tab" aria-selected={pane==='forensics'} className={pane==='forensics'?'active':''} onClick={openForensics}>DETECTIVE</button>
+            <button role="tab" aria-selected={pane==='j2'} className={pane==='j2'?'active':''} onClick={openJ2}>J₂ LAB</button>
             <button role="tab" aria-selected={pane==='history'} className={pane==='history'?'active':''} onClick={openHistory}>ARCHIVE</button>
           </div>
           <AnimatePresence mode="wait">
+            {pane==='j2'&&<PerturbationLab key="j2" data={visibleJ2} loading={j2Loading}
+              error={j2Error} days={j2Days} onDays={setJ2Days} design={design}
+              onInclination={value=>changeDesign({inclination_deg:value})} onRetry={()=>void fetchJ2(design,j2Days)}
+              onDesigner={()=>setPane('explore')}/>}
             {pane==='history'&&<HistoryLab key="history" snapshots={snapshots} referenceId={referenceId} candidateId={candidateId}
               onReference={setReferenceId} onCandidate={setCandidateId} data={history} loading={historyLoading}
               error={historyError} sourceStatus={sourceStatus} horizon={historyHorizon} onHorizon={setHistoryHorizon}
@@ -522,7 +570,7 @@ export default function App(){
           <div className="panel-end"><Waves size={15}/><span>APHELION SCIENCE ENGINE</span><span className="engine-ping"/></div>
         </aside>
       </div>
-      <footer className="bottom-bar"><span>APHELION / EXPERIMENT 007</span><span><span className="small-dot">●</span> REFERENCE FRAME: EARTH FIXED GEOCOORDINATES</span><span><Info size={13}/> EDUCATIONAL ORBITAL PREDICTIONS <span className="bottom-extra">— NOT FLIGHT TELEMETRY</span></span></footer>
+      <footer className="bottom-bar"><span>APHELION / EXPERIMENT 008</span><span><span className="small-dot">●</span> REFERENCE FRAME: EARTH FIXED GEOCOORDINATES</span><span><Info size={13}/> EDUCATIONAL ORBITAL PREDICTIONS <span className="bottom-extra">— NOT FLIGHT TELEMETRY</span></span></footer>
     </div>
   </div>;
 }

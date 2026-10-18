@@ -257,3 +257,12 @@ Build frontend after dependencies are installed (as in initial setup):
 cd frontend
 npm run build
 ```
+
+
+## J₂ Perturbation Laboratory (v0.8)
+
+Open **J₂ LAB** in the navigation. Adjust **inclination** and the **1/3/7-day** propagation horizon. Two animated globe tracks show central gravity versus Earth's J₂ zonal gravity; hover or scrub the nodal-drift chart to inspect osculating ascending-node motion. The globe displays the **last three hours** of the propagation, while the historical chart spans the entire selected horizon. Read the separate first-order averaged secular node rate to understand why prograde and retrograde inclinations have opposite signs.
+
+The physical model uses identical initial ECI states and 60-second RK4 timesteps on both sides. J₂ acceleration is an idealized Earth-oblateness perturbation, not an ISS-derived measurement, and is independent of CelesTrak. At strictly equatorial inclinations, RAAN is undefined.
+
+API: `GET /api/orbit/perturbations?horizon_days=3&inclination_deg=51.6` with additional optional Mission Designer orbital-element parameters. Run `python -m pytest -q tests/test_perturbations.py` inside `backend/` and `npm run build` inside `frontend/`.

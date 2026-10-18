@@ -78,6 +78,7 @@ A feature is **not complete** after only step 2. The preferred unit of progress 
 | **0.3 · Orbit Explorer** (implemented) | Circular two-body inclination, semimajor axis/altitude, speed and period; validated state and epoch; Earth-fixed track | Altitude/inclination presets and sliders; animated violet spacecraft, tilted frozen-instant orbital plane and Earth-fixed ground trail; ISS comparison | Slider interaction triggers computation, visuals and numerical readouts together |
 | **0.4 · Mission Designer** (implemented) | Elliptical two-body propagation with eccentricity, i, Ω, ω, initial true anomaly, apsis distance and vis-viva speed | APHELION-X shape/plane/phase sliders, eccentricity diagram, illuminated apsis markers and speed readout | Compute state in Python, animate on 3D Earth and display synchronized results in the same slice |
 | **0.5 · Numerical Lab** (implemented) | Independently evolve the same Cartesian ECI initial state with Euler, velocity Verlet or RK4; analytic Kepler baseline; 3D ECI position error and invariants | Adjustable 10–360 s max integration substep; 1–3 period horizon; animated 3D analytic/numerical overlays, logarithmic interactive error plot, metric cards and time scrubbing | Analytic and numerical tracks start together; method and timestep visibly affect measured numerical error |
+| **0.8 · J₂ Perturbation Laboratory** (implemented) | Compare fixed-step RK4 two-body and J₂ zonal gravity trajectories from identical ECI initial state; compute osculating nodal drift and leading-order secular rate | Interactive inclination/horizon controls, overlaid 3D final-orbit trajectories, historic nodal-drift chart and synchronized telemetry | Inclination changes nodal-precession sign; numerical J₂ effects and limits displayed alongside real backend calculations |
 | **0.6 · Orbital Detective** (implemented) | Compare SGP4 predictions against two-body integration from the same epoch | Animated overlay and discrepancy timeline | Model disagreement is clearly labeled, not treated as observed error |
 | **0.7 · Epoch Archive** (implemented) | Archive independently recorded ISS TLE sets; compare SGP4 predictions at matched UTC instants | Snapshot selectors, historical import, 3D overlays and synchronized RIC discrepancy chart | No fabricated history; provenance and limitations displayed |
 
@@ -237,3 +238,20 @@ For two distinct epochs `t_a` and `t_b` no more than five days apart, choose com
 **API** `GET /api/orbit/history`, `POST /api/orbit/history/import`, and `GET /api/orbit/history/compare`. **UI:** archive selectors, horizon buttons, manual TLE import, honest empty/error/provenance states, an animated pair of 3D ISS trajectories, an interactive separation plot and the shared simulation playhead. The physics and UI are shipped in the same slice.
 
 **Verification:** `cd backend && python -m pytest -q tests/test_history.py`; `cd frontend && npm run build`. Full browser integration requires the user's local environment.
+
+
+## Perturbation Laboratory v0.8 — J₂ gravity
+
+Select **J₂ LAB**. The experiment compares two **hypothetical** trajectories from the same ECI Cartesian initial position and velocity, each advanced with a fixed **60-second RK4** timestep. The reference acceleration is `−μr/r³`; the second adds the zonal gravity term
+
+`a_J₂ = (3 J₂ μ Rₑ² / 2r⁵) · [x(5z²/r²−1), y(5z²/r²−1), z(5z²/r²−3)]`
+
+with `μ=398600.4418 km³/s²`, `J₂=0.00108262668`, and equatorial Earth radius `Rₑ=6378.137 km`. Both models share a constant inertial z-axis aligned with the assumed Earth rotation axis. Initial **perigee altitude** is still measured from the Mission Designer's spherical `6371 km` reference Earth, distinct from the WGS84 equatorial radius in J₂ acceleration.
+
+**Rate:** first-order averaged nodal precession `dΩ/dt = −(3/2)n J₂(Rₑ/p)² cos(i)` where `n=√(μ/a³)` and `p=a(1−e²)`. The chart instead shows **numerical osculating** ascending-node drift; short-period fluctuations mean its endpoint need not match the secular estimate exactly. Ω is **undefined** for equatorial orbits. Prograde nodes generally regress (negative sign), retrograde nodes advance, and the leading-order secular polar rate vanishes. Do not interpret model separation as observed orbital error, maneuver detection, or collision hazard.
+
+**Interaction:** change inclination (0–180°) or propagation horizon (1, 3, 7 days), hover/scrub the historical nodal-drift chart, and play the globe's **final three hours** of both models' predicted trajectories. The historical chart spans the full horizon; the 3D globe deliberately focuses on the last three hours to avoid aliasing from undersampled multiday orbital lines. The globe uses the existing simplified Earth-fixed GMST conversion and display interpolation; separation is calculated in ECI from unrounded Cartesian vectors. No drag, higher harmonics, Sun/Moon, precession/nutation, or precision Earth orientation.
+
+**Endpoint:** `GET /api/orbit/perturbations?horizon_days=3&inclination_deg=51.6&altitude_km=450&eccentricity=0.24&raan_deg=35&argument_of_periapsis_deg=60&phase_deg_at_epoch=0&epoch=2026-10-18T00:00:00Z`. Inputs are validated in FastAPI and the pure Python physics engine. No CelesTrak connectivity required for this hypothetical laboratory.
+
+**Targeted test:** `cd backend && python -m pytest -q tests/test_perturbations.py`. **Frontend:** `cd frontend && npm run build`.

@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 from .orbits import build_mission, safe_satellite
 from .explorer import build_preview
 
-app = FastAPI(title="Orbital Detective API", version="0.7.0")
+app = FastAPI(title="Orbital Detective API", version="0.8.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -18,7 +18,7 @@ app.add_middleware(
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "version": "0.7.0", "mode": "predicted_orbit_not_live_telemetry"}
+    return {"status": "ok", "version": "0.8.0", "mode": "predicted_orbit_not_live_telemetry"}
 
 
 @app.get("/api/mission")
@@ -135,5 +135,26 @@ def history_compare(
     from .history import compare_history
     try:
         return compare_history(reference_id, candidate_id, horizon_hours)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get('/api/orbit/perturbations')
+def compare_j2_orbits(
+    epoch: datetime | None = None,
+    altitude_km: float = Query(450, ge=200, le=2000),
+    inclination_deg: float = Query(51.6, ge=0, le=180),
+    eccentricity: float = Query(0.1, ge=0, le=0.35),
+    raan_deg: float = Query(35, ge=0, le=360),
+    argument_of_periapsis_deg: float = Query(60, ge=0, le=360),
+    phase_deg_at_epoch: float = Query(0, ge=0, le=360),
+    horizon_days: int = Query(3, ge=1, le=7),
+):
+    """Paired RK4 integrations: point-mass Earth versus J2 gravity."""
+    from .perturbations import compare_j2
+    try:
+        return compare_j2(epoch or datetime.now(timezone.utc), altitude_km, inclination_deg,
+                          eccentricity, raan_deg, argument_of_periapsis_deg,
+                          phase_deg_at_epoch, horizon_days)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

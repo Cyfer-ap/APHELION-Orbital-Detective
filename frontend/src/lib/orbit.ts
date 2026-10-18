@@ -159,3 +159,16 @@ export type HistoryComparison = {
   summary:{final_separation_km:number;max_separation_km:number;max_separation_at_minutes:number};
   assumptions:string[];
 };
+
+
+/** Hypothetical J₂ versus central-gravity comparison; same initial ECI state. */
+export type J2Diagnostic = { elapsed_hours:number; raan_drift_deg:number|null; separation_km:number };
+export type J2Comparison = {
+  kind:'j2_vs_two_body'; epoch_utc:string; parameters:OrbitDesign;
+  model:{horizon_days:number;step_seconds:number;earth_equatorial_radius_km:number;j2:number;comparison:string};
+  window_start_utc:string;window_end_utc:string;
+  reference_track:LabSample[];j2_track:LabSample[];diagnostics:J2Diagnostic[];
+  summary:{secular_raan_rate_deg_day:number;final_raan_drift_deg:number|null;
+    final_separation_km:number;max_sampled_separation_km:number};
+  assumptions:string[];
+};
