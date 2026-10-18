@@ -184,3 +184,16 @@
 @media(max-width:850px){.forensic-stage-toggle{top:195px}}
 @media(max-width:580px){.forensic-stage-toggle{top:184px}.forensic-horizon button{font-size:15px;padding:10px 5px}.forensic-major strong{font-size:18px}.panel-tabs{flex-wrap:wrap;gap:7px}}
 @media(prefers-reduced-motion:reduce){.forensic-status.is-busy .forensic-pulse{animation:none}.forensic-horizon button{transition:none}}
+/* v0.7 — epoch archive: translucent instrumentation, clear provenance, accessible states. */
+.archive-lab .archive-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;color:#91c9d5;font:9px var(--mono);letter-spacing:.06em;margin:13px 0 9px}
+.archive-lab .archive-toolbar span{display:flex;align-items:center;gap:8px}
+.archive-lab .archive-toolbar button{background:#173447;border:1px solid #47798c;border-radius:5px;color:#9fe5e8;padding:7px;cursor:pointer}
+.archive-select-label{display:block;color:#83aabb;font:8px var(--mono);letter-spacing:.08em;margin:15px 0 6px}
+.archive-lab select{width:100%;color:#d7f3f8;background:linear-gradient(115deg,#1b3a4e,#112638);border:1px solid #4c78907a;padding:11px 10px;border-radius:5px;font:10px var(--mono);outline-offset:2px;cursor:pointer}
+.archive-lab select:focus-visible,.archive-lab textarea:focus-visible{outline:2px solid #76e6df}
+.archive-import{margin:19px 0 15px;border:1px solid #3d798078;border-radius:8px;padding:12px;background:linear-gradient(125deg,#15394986,#1b283686);box-shadow:inset 0 0 25px #73e6f308}
+.archive-import textarea{display:block;resize:vertical;min-height:88px;max-height:180px;box-sizing:border-box;width:100%;background:#0c1e2a;color:#c3edf1;border:1px solid #4b6875;border-radius:5px;padding:10px;font:10px/1.6 var(--mono);margin:8px 0 10px}
+.archive-import button{display:flex;gap:7px;align-items:center;justify-content:center;width:100%;background:#275c65;color:#c7fbf4;border:1px solid #6eaea9;border-radius:5px;padding:10px;font:9px var(--mono);cursor:pointer;transition:background .2s,transform .2s}
+.archive-import button:hover:not(:disabled){background:#357b7c;transform:translateY(-1px)}.archive-import button:disabled{opacity:.47;cursor:not-allowed}
+.archive-import p{font:9px/1.6 'DM Sans',sans-serif;color:#779eaf;margin:9px 0 0}
+.archive-alert{padding:10px;color:#eec6a7;background:#8a5b2d18;border-left:2px solid #cf9a6b;font:9px/1.6 var(--mono);overflow-wrap:anywhere}

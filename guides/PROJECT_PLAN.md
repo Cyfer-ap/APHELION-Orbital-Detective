@@ -1,6 +1,6 @@
 # APHELION — Vision, Scientific Architecture & Development Plan
 
-**Status:** v0.5 Numerical Lab implemented; local full frontend build / browser interaction verification is the next checkpoint  
+**Status:** v0.7 historical element archive implemented; local frontend build and integration verification required  
 **Project identity:** Orbital Detective / APHELION  
 **Type:** Personal, interactive scientific playground, not a production satellite operations tool
 
@@ -78,7 +78,8 @@ A feature is **not complete** after only step 2. The preferred unit of progress 
 | **0.3 · Orbit Explorer** (implemented) | Circular two-body inclination, semimajor axis/altitude, speed and period; validated state and epoch; Earth-fixed track | Altitude/inclination presets and sliders; animated violet spacecraft, tilted frozen-instant orbital plane and Earth-fixed ground trail; ISS comparison | Slider interaction triggers computation, visuals and numerical readouts together |
 | **0.4 · Mission Designer** (implemented) | Elliptical two-body propagation with eccentricity, i, Ω, ω, initial true anomaly, apsis distance and vis-viva speed | APHELION-X shape/plane/phase sliders, eccentricity diagram, illuminated apsis markers and speed readout | Compute state in Python, animate on 3D Earth and display synchronized results in the same slice |
 | **0.5 · Numerical Lab** (implemented) | Independently evolve the same Cartesian ECI initial state with Euler, velocity Verlet or RK4; analytic Kepler baseline; 3D ECI position error and invariants | Adjustable 10–360 s max integration substep; 1–3 period horizon; animated 3D analytic/numerical overlays, logarithmic interactive error plot, metric cards and time scrubbing | Analytic and numerical tracks start together; method and timestep visibly affect measured numerical error |
-| **0.6 · Orbital Detective** | Compare time-separated element sets and propagated positions; compute deviations | Visual "investigation" missions with orbit overlays and discrepancy timeline | User can inspect prediction differences without mistaking them for proven maneuvers |
+| **0.6 · Orbital Detective** (implemented) | Compare SGP4 predictions against two-body integration from the same epoch | Animated overlay and discrepancy timeline | Model disagreement is clearly labeled, not treated as observed error |
+| **0.7 · Epoch Archive** (implemented) | Archive independently recorded ISS TLE sets; compare SGP4 predictions at matched UTC instants | Snapshot selectors, historical import, 3D overlays and synchronized RIC discrepancy chart | No fabricated history; provenance and limitations displayed |
 
 These are **proposals**, not a promise to implement every item. Each slice is reviewed after local validation; exploration remains more important than feature quantity. Later optional experiments may include Sun/Earth illumination geometry, ground-station optimization, satellite constellations, and educational conjunction geometry (never safety-critical collision warnings).
 
@@ -225,3 +226,14 @@ The Python endpoint `GET /api/orbit/preview` validates both parameters and timez
 **Frontend:** New DETECTIVE tab and globe quick-launch. Animated violet SGP4 and amber two-body trajectories, interactive clickable/scrubbable discrepancy graph, four horizon presets, live RIC bars, satellite epoch/cache provenance, and conspicuous scientific cautions. The global playback timeline and 3D orbit camera are reused. A new set of data invalidates previous results until recomputation completes. No generic dashboard refactor.
 
 **Verification:** `PYTHONPATH=backend python -m pytest -q backend/tests/test_forensics.py backend/tests/test_numerical.py` covers signed RIC basis, RK4 circular/elliptic closed-orbit agreement, input rejection, and v0.5 numerical regressions. API runtime and bundled browser build require Skyfield/frontend dependencies on the local development machine. The target after validating v0.6 is to archive *distinct, verifiable, dated* element snapshots and compare SGP4 solutions with different input epochs, with element-set provenance and constraints stated explicitly.
+
+
+## Experiment 007 — historical TLE snapshot divergence
+
+Only real, recorded TLE contents are accepted: initially the ISS cached CelesTrak element record, then any later distinct updates or explicitly supplied historical TLEs. There is **no** built-in historical ephemeris provider and **no synthetic element archive**. The persistent local `backend/data/iss_tle_history.json` stores TLE text, element epoch, capture timestamp and source-status label. A user-provided TLE is syntactically validated but source authenticity cannot be established. The archive is local and ignored by Git.
+
+For two distinct epochs `t_a` and `t_b` no more than five days apart, choose common start `t_0 = max(t_a,t_b)`. Independently apply **SGP4** to each element set at the same UTC sequence `t_0 + k Δt`, convert both Skyfield GCRS states to WGS84 geographic coordinates for display, then calculate `δr(t) = r_b(t) − r_a(t)` in GCRS km. Signed RIC components use the first model's local radial, transverse and cross-track unit vectors. The norm `||δr||₂` is model **prediction separation**; it is not observational accuracy or a verified maneuver. Epoch separation constraints reduce extreme extrapolation but do not guarantee accuracy.
+
+**API** `GET /api/orbit/history`, `POST /api/orbit/history/import`, and `GET /api/orbit/history/compare`. **UI:** archive selectors, horizon buttons, manual TLE import, honest empty/error/provenance states, an animated pair of 3D ISS trajectories, an interactive separation plot and the shared simulation playhead. The physics and UI are shipped in the same slice.
+
+**Verification:** `cd backend && python -m pytest -q tests/test_history.py`; `cd frontend && npm run build`. Full browser integration requires the user's local environment.

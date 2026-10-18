@@ -2,22 +2,23 @@
 from datetime import datetime, timezone
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
 from .orbits import build_mission, safe_satellite
 from .explorer import build_preview
 
-app = FastAPI(title="Orbital Detective API", version="0.6.0")
+app = FastAPI(title="Orbital Detective API", version="0.7.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
     allow_credentials=False,
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "version": "0.6.0", "mode": "predicted_orbit_not_live_telemetry"}
+    return {"status": "ok", "version": "0.7.0", "mode": "predicted_orbit_not_live_telemetry"}
 
 
 @app.get("/api/mission")
@@ -98,3 +99,41 @@ def forensic_investigation(horizon_hours: int = Query(6, ge=3, le=24)):
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Orbital investigation unavailable: {exc}") from exc
+
+
+class HistoricalTLE(BaseModel):
+    tle: str = Field(min_length=138, max_length=512)
+
+
+@app.get('/api/orbit/history')
+def history_snapshots():
+    """List actual locally recorded or user-provided ISS TLE snapshots."""
+    from .history import list_snapshots, record_latest
+    status = 'ok'
+    try:
+        record_latest()
+    except (ValueError, RuntimeError, OSError) as exc:
+        status = f'Latest CelesTrak fetch unavailable: {exc}'
+    return {'snapshots': list_snapshots(), 'source_status': status}
+
+
+@app.post('/api/orbit/history/import')
+def history_import(payload: HistoricalTLE):
+    from .history import import_snapshot
+    try:
+        return import_snapshot(payload.tle)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get('/api/orbit/history/compare')
+def history_compare(
+    reference_id: str = Query(min_length=16, max_length=16),
+    candidate_id: str = Query(min_length=16, max_length=16),
+    horizon_hours: int = Query(6, ge=3, le=24),
+):
+    from .history import compare_history
+    try:
+        return compare_history(reference_id, candidate_id, horizon_hours)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc

@@ -1,13 +1,13 @@
 import { useMemo } from 'react';
 import { motion } from 'motion/react';
 import { Activity, AlertCircle, ArrowUpRight, Crosshair, GitCompareArrows, RefreshCw, ScanSearch } from 'lucide-react';
-import type { ForensicComparison } from '../lib/orbit';
+import type { ForensicComparison, HistoryComparison } from '../lib/orbit';
 
 type Props={data:ForensicComparison|null;loading:boolean;error:string|null;horizon:number;
   time:number;onHorizon:(h:number)=>void;onJump:(ms:number)=>void;onRetry:()=>void};
 const fmt=(x:number,n=2)=>x.toLocaleString('en-US',{maximumFractionDigits:n});
 
-function SeparationChart({data,time,onJump}:{data:ForensicComparison;time:number;onJump:(ms:number)=>void}){
+export function SeparationChart({data,time,onJump}:{data:ForensicComparison | HistoryComparison;time:number;onJump:(ms:number)=>void}){
   const {curve,area,ticks,cursor}=useMemo(()=>{
     const values=data.diagnostics;
     const max=Math.max(.001,data.summary.max_separation_km*1.12);
@@ -25,7 +25,7 @@ function SeparationChart({data,time,onJump}:{data:ForensicComparison;time:number
     onJump(Date.parse(samples[index].time));
   };
   return <section className="forensic-chart">
-    <div className="forensic-label"><span><Activity size={14}/> MODEL SEPARATION</span><span>GCRS / km</span></div>
+    <div className="forensic-label"><span><Activity size={14}/> PREDICTION SEPARATION</span><span>GCRS / km</span></div>
     <svg role="img" aria-label="Difference between SGP4 and two-body predictions. Click to select an epoch." viewBox="0 0 340 122"
       onClick={e=>{const r=e.currentTarget.getBoundingClientRect();seek(((e.clientX-r.left)/r.width*340-19)/300)}}>
       <defs><linearGradient id="forensic-area" x1="0" y1="0" x2="0" y2="1"><stop stopColor="#73ddeb" stopOpacity=".28"/><stop offset="1" stopColor="#73ddeb" stopOpacity="0"/></linearGradient></defs>
@@ -57,7 +57,7 @@ export default function OrbitForensics({data,loading,error,horizon,time,onHorizo
     <p className="forensic-method">Begin at the ISS element epoch with identical GCRS position and velocity. Compare published-element SGP4 predictions against an unperturbed RK4 two-body continuation.</p>
     <div className="forensic-key"><span><i className="sgp4"/> SGP4 · ELEMENTS</span><span><i className="kepler"/> KEPLER · TWO BODY</span></div>
     {active ? <>
-      <div className="forensic-major"><div><span>FINAL MODEL SEPARATION</span><strong>{fmt(active.summary.final_separation_km,3)}<small>km</small></strong></div><div><span>PEAK / {fmt(active.summary.max_separation_at_minutes/60,1)} h</span><b>{fmt(active.summary.max_separation_km,3)} km</b></div></div>
+      <div className="forensic-major"><div><span>FINAL PREDICTION SEPARATION</span><strong>{fmt(active.summary.final_separation_km,3)}<small>km</small></strong></div><div><span>PEAK / {fmt(active.summary.max_separation_at_minutes/60,1)} h</span><b>{fmt(active.summary.max_separation_km,3)} km</b></div></div>
       <SeparationChart data={active} time={time} onJump={onJump}/>
       <div className="forensic-label"><span><GitCompareArrows size={14}/> RELATIVE ORBITAL FRAME</span><span>AT PLAYHEAD</span></div>
       <div className="forensic-ric">{[

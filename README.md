@@ -228,6 +228,16 @@ Available methods are first-order **forward Euler**, second-order **velocity Ver
 
 The lab is ideal two-body mechanics—not SGP4, a perturbation model, operational orbit determination, or real satellite tracking. No collision safety conclusions should be drawn from it.
 
+## Epoch Archive v0.7 — two recorded ISS element epochs
+
+Open **ARCHIVE** (experiment 007) to inspect historically recorded **ISS (NORAD 25544)** orbital-element sets. The app archives each distinct CelesTrak TLE it encounters when the archive is opened; it cannot retroactively recreate old observations that were never saved. Paste a complete historical 2LE/3LE from a source you trust to make an immediate comparison with the current cached ISS TLE. Imported sources are explicitly flagged **unverified**.
+
+The backend verifies each element line length, NORAD catalog ID, and TLE checksum, deduplicates snapshots by SHA-256 content hash, and writes the local archive into `backend/data/iss_tle_history.json` (ignored by Git). Select distinct records with epochs within five days and choose a 3–24 hour horizon. Both models use **SGP4**, each at exactly the same UTC sample instants beginning at the newer element epoch. The backend computes GCRS position separation and signed radial/along-track/cross-track components. Two animated globe trajectories, shared playhead, scrollable separation chart and provenance labels provide the paired visualization. Neither curve is observational truth; the difference is not evidence of a maneuver.
+
+**Endpoints:** `GET /api/orbit/history` (archives current cached TLE and lists records), `POST /api/orbit/history/import` with JSON `{"tle": "ISS ...\n1 25544...\n2 25544..."}`, and `GET /api/orbit/history/compare?reference_id=<id>&candidate_id=<id>&horizon_hours=6`. When no second snapshot exists, the interface offers a truthful empty state instead of manufactured data. Snapshots are stored **locally** by the backend and are not uploaded or published.
+
+**Targeted tests:** `cd backend && python -m pytest -q tests/test_history.py`, then `cd frontend && npm run build` (using existing local dependencies).
+
 ## Orbit Forensics v0.6 — SGP4 versus two-body physics
 
 Select **DETECTIVE** or **OPEN ORBIT FORENSICS**. APHELION acquires real ISS orbital elements (CelesTrak), takes one SGP4 GCRS epoch state, and propagates it twice: SGP4 vs an unperturbed two-body RK4 solution. Select 3, 6, 12, or 24 hours; inspect both moving trajectories and click/scrub the model-separation chart to jump to any sample. Read the signed Radial / Along-track / Cross-track differences and the original element epoch/age. Backend API: `GET /api/orbit/forensics?horizon_hours=6`.

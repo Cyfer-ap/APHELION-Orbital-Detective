@@ -147,3 +147,15 @@ export type ForensicComparison = {
   summary:{final_separation_km:number;max_separation_km:number;max_separation_at_minutes:number;initial_specific_energy_km2_s2:number};
   assumptions:string[];
 };
+
+/** Two independently recorded ISS TLE element sets, propagated with the same SGP4 model. */
+export type HistorySnapshot = {id:string;epoch_utc:string;recorded_at_utc:string;source:string};
+export type HistoryComparison = {
+  kind:'sgp4_historical_snapshot_comparison';
+  satellite:{name:string;catalog_number:number};epoch_utc:string;
+  reference:HistorySnapshot;candidate:HistorySnapshot;
+  model:{horizon_hours:number;sampling_interval_minutes:number;integration_method:'sgp4';maximum_integration_step_s:number};
+  reference_track:LabSample[];numerical_track:LabSample[];diagnostics:ForensicDiagnostic[];
+  summary:{final_separation_km:number;max_separation_km:number;max_separation_at_minutes:number};
+  assumptions:string[];
+};
