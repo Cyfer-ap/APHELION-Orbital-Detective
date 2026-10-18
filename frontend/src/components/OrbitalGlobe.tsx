@@ -139,9 +139,9 @@ function SurfaceFootprint({ current, mask }: { current: Sample | null; mask: num
     </mesh>
     <Line points={geometry.edge} color="#78eedc" opacity={.82} transparent lineWidth={1.8} raycast={() => null} />
     <Line points={geometry.edge} color="#5bd9e0" opacity={.16} transparent lineWidth={8} raycast={() => null} />
-    <Html center distanceFactor={12} position={earthVector(current.lat, current.lon, 15)} occlude className="footprint-tag">
+    {current && <Html center distanceFactor={12} position={earthVector(current.lat, current.lon, 15)} occlude className="footprint-tag">
       {mask.toFixed(0)}° FOOTPRINT
-    </Html>
+    </Html>}
   </group>;
 }
 
@@ -247,7 +247,7 @@ function NumericalOrbit({ result, getTime }: { result: LabComparison | ForensicC
     <Line points={analyticPoints} color="#c39cff" lineWidth={2.3} opacity={.9} transparent raycast={() => null}/>
     <Line points={numericPoints} color="#f2aa70" lineWidth={2} opacity={.83} transparent dashed dashSize={.035} gapSize={.024} raycast={() => null}/>
     <group ref={errorLine}>
-      <line raycast={() => null}>
+      <line>
         <bufferGeometry ref={lineRef}><bufferAttribute attach="attributes-position" args={[errorPoints,3]}/></bufferGeometry>
         <lineBasicMaterial color="#f7ddb9" transparent opacity={.8} depthTest={false}/>
       </line>
